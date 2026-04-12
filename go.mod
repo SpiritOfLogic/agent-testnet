@@ -1,4 +1,4 @@
-module github.com/agent-testnet/agent-testnet
+module github.com/SpiritOfLogic/agent-testnet
 
 go 1.25.0
 

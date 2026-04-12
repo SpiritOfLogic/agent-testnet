@@ -8,8 +8,8 @@ import (
 	"time"
 
 	mdns "github.com/miekg/dns"
-	"github.com/agent-testnet/agent-testnet/pkg/config"
-	"github.com/agent-testnet/agent-testnet/server/controlplane"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/config"
+	"github.com/SpiritOfLogic/agent-testnet/server/controlplane"
 )
 
 // DomainResolver is the interface for looking up domain -> VIP mappings.

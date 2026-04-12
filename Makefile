@@ -1,10 +1,10 @@
-.PHONY: build build-server build-client build-node build-linux \
+.PHONY: build build-server build-client build-node build-toolkit build-linux \
        rootfs download-kernel run-server smoke release clean
 
 BIN_DIR := ./bin
 GO := go
 
-build: build-server build-client build-node
+build: build-server build-client build-node build-toolkit
 
 build-server:
 	$(GO) build -o $(BIN_DIR)/testnet-server ./cmd/testnet-server
@@ -15,13 +15,17 @@ build-client:
 build-node:
 	$(GO) build -o $(BIN_DIR)/testnet-node ./cmd/testnet-node
 
+build-toolkit:
+	$(GO) build -o $(BIN_DIR)/testnet-toolkit ./cmd/testnet-toolkit
+
 build-linux:
 	docker build --network=host -f Dockerfile.build -t agent-testnet-builder .
 	@mkdir -p build-linux
 	@CONTAINER_ID=$$(docker create --entrypoint="" agent-testnet-builder /bin/true) && \
-	  docker cp $$CONTAINER_ID:/testnet-server build-linux/ && \
-	  docker cp $$CONTAINER_ID:/testnet-client build-linux/ && \
-	  docker cp $$CONTAINER_ID:/testnet-node   build-linux/ && \
+	  docker cp $$CONTAINER_ID:/testnet-server  build-linux/ && \
+	  docker cp $$CONTAINER_ID:/testnet-client  build-linux/ && \
+	  docker cp $$CONTAINER_ID:/testnet-node    build-linux/ && \
+	  docker cp $$CONTAINER_ID:/testnet-toolkit build-linux/ && \
 	  docker rm $$CONTAINER_ID >/dev/null
 	@echo "Linux binaries in build-linux/"
 

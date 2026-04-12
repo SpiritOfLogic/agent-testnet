@@ -10,8 +10,8 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"github.com/agent-testnet/agent-testnet/client/daemon"
-	"github.com/agent-testnet/agent-testnet/pkg/api"
+	"github.com/SpiritOfLogic/agent-testnet/client/daemon"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/api"
 )
 
 func newDaemonCmd() *cobra.Command {

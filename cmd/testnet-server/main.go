@@ -8,11 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/agent-testnet/agent-testnet/pkg/config"
-	"github.com/agent-testnet/agent-testnet/server/controlplane"
-	"github.com/agent-testnet/agent-testnet/server/dns"
-	"github.com/agent-testnet/agent-testnet/server/router"
-	"github.com/agent-testnet/agent-testnet/server/wg"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/config"
+	"github.com/SpiritOfLogic/agent-testnet/server/controlplane"
+	"github.com/SpiritOfLogic/agent-testnet/server/dns"
+	"github.com/SpiritOfLogic/agent-testnet/server/router"
+	"github.com/SpiritOfLogic/agent-testnet/server/wg"
 )
 
 func main() {

@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/agent-testnet/agent-testnet/pkg/config"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/config"
 )
 
 var (

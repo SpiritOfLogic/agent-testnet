@@ -10,8 +10,9 @@
 # One-command deployment via environment variables:
 #
 #   Server:
-#     NODES_YAML='nodes: [{name: n1, address: "1.2.3.4:443", secret: s3c, domains: ["example.com"]}]' \
-#       sudo -E bash install.sh server
+#     AUTO_START=1 sudo -E bash install.sh server
+#     (Place nodes.yaml at /tmp/nodes.yaml before running, or it uses the
+#      default empty config. The deploy script handles this automatically.)
 #
 #   Node:
 #     SERVER_URL=https://SERVER:8443 NODE_NAME=mynode NODE_SECRET=s3c \
@@ -22,13 +23,14 @@
 #       sudo -E bash install.sh client
 #
 # Environment variables (optional, all roles):
+#   AUTO_START   - Set to 1 to auto-start the service after install (server)
 #   RELEASE_URL  - Base URL for release artifacts (default: GitHub releases)
 #   VERSION      - Release version tag (default: latest)
 #
 set -euo pipefail
 
 ROLE="${1:-}"
-RELEASE_URL="${RELEASE_URL:-https://github.com/agent-testnet/agent-testnet/releases/latest/download}"
+RELEASE_URL="${RELEASE_URL:-https://github.com/SpiritOfLogic/agent-testnet/releases/latest/download}"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/opt/testnet/configs"
 DATA_DIR="/opt/testnet/data"
@@ -244,10 +246,11 @@ YAML
         info "Created ${CONFIG_DIR}/server.yaml"
     fi
 
-    # Write nodes.yaml: from NODES_YAML env var or default placeholder
-    if [ -n "${NODES_YAML:-}" ]; then
-        echo "$NODES_YAML" > "${CONFIG_DIR}/nodes.yaml"
-        info "Created ${CONFIG_DIR}/nodes.yaml (from NODES_YAML env)"
+    # Write nodes.yaml: prefer /tmp/nodes.yaml (placed by deploy script),
+    # fall back to default placeholder.
+    if [ -f /tmp/nodes.yaml ]; then
+        cp /tmp/nodes.yaml "${CONFIG_DIR}/nodes.yaml"
+        info "Created ${CONFIG_DIR}/nodes.yaml (from /tmp/nodes.yaml)"
     elif [ ! -f "${CONFIG_DIR}/nodes.yaml" ]; then
         cat > "${CONFIG_DIR}/nodes.yaml" <<'YAML'
 nodes: []
@@ -289,8 +292,8 @@ UNIT
         echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
     fi
 
-    # Auto-start if NODES_YAML was provided (one-command mode)
-    if [ -n "${NODES_YAML:-}" ]; then
+    # Auto-start if requested (one-command mode via deploy script)
+    if [ "${AUTO_START:-}" = "1" ]; then
         info "Starting testnet-server..."
         systemctl start testnet-server
         sleep 3
@@ -389,6 +392,7 @@ install_node() {
     info "Installing testnet-node..."
 
     download_binary "testnet-node"
+    download_binary "testnet-toolkit"
 
     mkdir -p /etc/testnet /opt/testnet
 

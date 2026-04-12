@@ -6,9 +6,11 @@
 #   dist/testnet-server-linux-amd64
 #   dist/testnet-client-linux-amd64
 #   dist/testnet-node-linux-amd64
+#   dist/testnet-toolkit-linux-amd64
 #   dist/testnet-server-linux-arm64
 #   dist/testnet-client-linux-arm64
 #   dist/testnet-node-linux-arm64
+#   dist/testnet-toolkit-linux-arm64
 #   dist/install.sh
 #
 # If --rootfs is passed and running on Linux, also builds:
@@ -34,7 +36,7 @@ build_binaries() {
     local arch="$1"
     echo "==> Building linux/${arch} binaries..."
 
-    for bin in testnet-server testnet-client testnet-node; do
+    for bin in testnet-server testnet-client testnet-node testnet-toolkit; do
         local cmd_dir="./cmd/${bin}"
         local out="${DIST_DIR}/${bin}-linux-${arch}"
         CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" \
@@ -52,7 +54,7 @@ else
     echo "==> Go not found locally, building via Docker..."
     docker build -f Dockerfile.build -t agent-testnet-builder .
     CONTAINER_ID=$(docker create --entrypoint="" agent-testnet-builder /bin/true)
-    for bin in testnet-server testnet-client testnet-node; do
+    for bin in testnet-server testnet-client testnet-node testnet-toolkit; do
         docker cp "${CONTAINER_ID}:/${bin}" "${DIST_DIR}/${bin}-linux-amd64"
     done
     docker rm "$CONTAINER_ID" >/dev/null

@@ -25,41 +25,54 @@ A sandboxed internet environment for AI agents. Agents run inside Firecracker mi
 - **testnet-server** -- Control plane: client registration, DNS (VIP-based), WireGuard hub, iptables DNAT routing
 - **testnet-client** -- Agent sandbox: Firecracker VM management, per-VM ephemeral SSH keys, network isolation via iptables
 - **testnet-node** -- Any service exposed to agents; fetches TLS certs from the server's CA
+- **testnet-toolkit** -- Composable CLI tools for integrating existing applications with the testnet (see [Toolkit](#toolkit) below)
 
-## One-Command Deployment
+## Deployment
+
+### AWS (automated)
+
+```bash
+# 1. Create your node config from the example
+cp configs/nodes.yaml.example configs/nodes.yaml
+# 2. Edit configs/nodes.yaml — fill in node addresses and secrets
+# 3. Deploy everything (builds binaries, provisions AWS, installs services)
+bash deploy/aws-deploy.sh deploy
+```
+
+Other commands:
+
+```bash
+bash deploy/aws-deploy.sh status     # Show instance IPs
+bash deploy/aws-deploy.sh ssh node   # SSH into a role
+bash deploy/aws-deploy.sh reload     # Push updated nodes.yaml + reload server
+bash deploy/aws-deploy.sh test       # Run integration tests on the client
+bash deploy/aws-deploy.sh teardown   # Destroy all resources
+```
+
+### Manual (per-host)
 
 Each role deploys to a fresh Linux host with a single command. Binaries are pre-placed at `/usr/local/bin/` or downloaded from a release URL.
 
-### Server
+**Server:**
 
 ```bash
-NODES_YAML='nodes:
-  - name: node1
-    address: "NODE_IP:443"
-    secret: "shared-secret"
-    domains: ["google.com", "www.google.com"]
-' sudo -E bash install.sh server
+# Place your nodes.yaml at /tmp/nodes.yaml, then:
+AUTO_START=1 sudo -E bash install.sh server
 ```
 
-Installs deps, writes config, starts the service, and prints the join token.
-
-### Node
+**Node:**
 
 ```bash
-SERVER_URL=https://SERVER_IP:8443 NODE_NAME=node1 NODE_SECRET=shared-secret \
+SERVER_URL=https://SERVER_IP:8443 NODE_NAME=mynode NODE_SECRET=s3cret \
   sudo -E bash install.sh node
 ```
 
-Installs the binary, writes `/etc/testnet/node.env`, starts the service.
-
-### Client
+**Client:**
 
 ```bash
 SERVER_URL=https://SERVER_IP:8443 JOIN_TOKEN=<token> \
   sudo -E bash install.sh client
 ```
-
-Installs deps, downloads Firecracker + kernel, registers with the server, brings up the WireGuard tunnel, and builds a lean Alpine rootfs (~512 MB). Optionally set `ROOTFS_URL` to download a pre-built rootfs instead.
 
 Then launch an agent VM:
 
@@ -68,6 +81,45 @@ sudo testnet-client agent launch --standalone
 ```
 
 The rootfs ships with bash, curl, git, jq, and SSH. Agents can install additional runtimes inside the VM via `apk add` (e.g. `apk add nodejs npm python3`).
+
+### Adding a node to a running deployment
+
+1. Deploy the node host and run `install.sh node` (or provision it however you like)
+2. Add the node entry to `configs/nodes.yaml`:
+
+```yaml
+  - name: "search"
+    address: "NEW_NODE_IP:443"
+    secret: "the-shared-secret"
+    domains:
+      - "google.com"
+```
+
+3. Reload the server:
+
+```bash
+bash deploy/aws-deploy.sh reload
+```
+
+The server re-reads `nodes.yaml` on reload (SIGHUP), allocates VIPs for new nodes, and updates DNS + routing — no restart needed. The new node is immediately reachable by agents at its declared domains and its auto-name (`search.testnet`).
+
+## Toolkit
+
+`testnet-toolkit` is a single binary with subcommands for integrating existing open-source applications (Gitea, DokuWiki, etc.) with the testnet. Instead of writing a custom Go binary for every service, operators use the toolkit alongside standard reverse proxies (nginx, Caddy).
+
+| Subcommand | Purpose |
+|------------|---------|
+| `testnet-toolkit certs fetch` | Fetch TLS certificates from the control plane and write to disk |
+| `testnet-toolkit seed urls\|domains\|json` | Discover testnet domains and output seed URLs for crawlers |
+| `testnet-toolkit sandbox run` | Run a process confined to testnet-only networking |
+
+See the [Toolkit Reference](docs/toolkit-reference.md) for full usage and the [Node Toolkit Design](docs/node-toolkit-design.md) for architecture rationale.
+
+**Deployment guides:**
+
+- [Deploy Gitea as GitHub](docs/guide-deploy-gitea.md)
+- [Deploy DokuWiki as Wikipedia](docs/guide-deploy-dokuwiki.md)
+- [Deploy a search engine with sandboxed crawler](docs/guide-deploy-crawler.md)
 
 ## Local Development
 
@@ -107,10 +159,14 @@ make smoke
 ## Project Structure
 
 ```
-cmd/                    Entry points for the three binaries
+cmd/                    Entry points for the binaries
   testnet-server/
   testnet-client/
   testnet-node/
+  testnet-toolkit/
+toolkit/                Toolkit packages (CLI commands + sandbox logic)
+  cli/
+  sandbox/
 server/                 Server-side packages
   controlplane/         Registration, CA, VIP allocation
   dns/                  Testnet DNS server
@@ -123,7 +179,7 @@ client/                 Client-side packages
 pkg/                    Shared packages
   api/                  API types + HTTP client
   config/               Config structs + loading
-configs/                Example configs (local development)
+configs/                Config files (nodes.yaml.example is the template; copy to nodes.yaml)
 deploy/
   install.sh            Universal installer (one-command deployment)
 scripts/
@@ -131,7 +187,13 @@ scripts/
   build-release.sh      Cross-compiles release artifacts
   smoke-test.sh         API-level smoke test suite
 docs/
-  testnet_mvp_design.md Architecture design document
+  testnet_mvp_design.md   Architecture design document
+  node-development.md     Guide for building testnet nodes
+  node-toolkit-design.md  Toolkit design: build-vs-reuse analysis
+  toolkit-reference.md    testnet-toolkit CLI reference
+  guide-deploy-gitea.md   Deploy Gitea as GitHub
+  guide-deploy-dokuwiki.md Deploy DokuWiki as Wikipedia
+  guide-deploy-crawler.md Deploy search engine with sandboxed crawler
 ```
 
 ## Network Requirements

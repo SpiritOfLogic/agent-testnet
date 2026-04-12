@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/agent-testnet/agent-testnet/client/daemon"
-	"github.com/agent-testnet/agent-testnet/pkg/api"
-	"github.com/agent-testnet/agent-testnet/pkg/config"
-	"github.com/agent-testnet/agent-testnet/server/wg"
+	"github.com/SpiritOfLogic/agent-testnet/client/daemon"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/api"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/config"
+	"github.com/SpiritOfLogic/agent-testnet/server/wg"
 )
 
 const wgInterfaceName = "wg-testnet"

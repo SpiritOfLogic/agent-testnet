@@ -9,7 +9,8 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/testnet-server ./cmd/testnet-server
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/testnet-client ./cmd/testnet-client
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/testnet-node   ./cmd/testnet-node
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/testnet-node    ./cmd/testnet-node
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/testnet-toolkit ./cmd/testnet-toolkit
 
 FROM scratch
 COPY --from=builder /out/ /

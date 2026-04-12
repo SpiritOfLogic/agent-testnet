@@ -14,8 +14,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/agent-testnet/agent-testnet/client/sandbox"
-	"github.com/agent-testnet/agent-testnet/pkg/api"
+	"github.com/SpiritOfLogic/agent-testnet/client/sandbox"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/api"
 )
 
 // AgentInstance represents a running agent VM.

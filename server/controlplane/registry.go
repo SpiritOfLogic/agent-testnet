@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agent-testnet/agent-testnet/pkg/api"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/api"
 )
 
 // Registry manages client registration — the only dynamic entity.

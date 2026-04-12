@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agent-testnet/agent-testnet/pkg/config"
-	"github.com/agent-testnet/agent-testnet/server/controlplane"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/config"
+	"github.com/SpiritOfLogic/agent-testnet/server/controlplane"
 )
 
 // Logger observes connections via conntrack and writes structured JSON logs.

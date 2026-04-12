@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/agent-testnet/agent-testnet/pkg/api"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/api"
 	"gopkg.in/yaml.v3"
 )
 

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/agent-testnet/agent-testnet/pkg/api"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/api"
 )
 
 // Store manages persistent and in-memory state for clients.

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/agent-testnet/agent-testnet/pkg/api"
-	"github.com/agent-testnet/agent-testnet/pkg/config"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/api"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/config"
 )
 
 // Daemon is the testnet-client background service.

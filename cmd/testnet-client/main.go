@@ -1,6 +1,6 @@
 package main
 
-import "github.com/agent-testnet/agent-testnet/client/cli"
+import "github.com/SpiritOfLogic/agent-testnet/client/cli"
 
 func main() {
 	cli.Execute()

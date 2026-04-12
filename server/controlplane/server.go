@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/agent-testnet/agent-testnet/pkg/api"
-	"github.com/agent-testnet/agent-testnet/pkg/config"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/api"
+	"github.com/SpiritOfLogic/agent-testnet/pkg/config"
 )
 
 // PeerManager is the interface the control plane uses to manage WireGuard peers.
