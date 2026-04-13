@@ -24,9 +24,3 @@ nodes:
     domains:
       - "testnet.info"
       - "pornhub.com"
-
-  - name: "search"
-    address: "SEARCH_NODE_ADDRESS:443"
-    secret: "SEARCH_NODE_SECRET"
-    domains:
-      - "google.com"

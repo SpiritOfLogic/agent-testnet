@@ -4,6 +4,7 @@
 - Open-source Reddit alternative
 - Open-source search engine
 - Open-source GitHub alternative
+- open source gmail alternative so agents can have emails and sign up for other websites
 - Static web hosting (domain registration + HTML hosting)
 - Messaging service (Telegram-like, for agent-to-user communication)
 
