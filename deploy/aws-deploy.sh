@@ -8,8 +8,17 @@
 #   bash deploy/aws-deploy.sh status          # Show instance IPs and status
 #   bash deploy/aws-deploy.sh ssh <role>      # SSH into server|node|client
 #   bash deploy/aws-deploy.sh restart <role>  # Restart a service (server|node|client)
+#   bash deploy/aws-deploy.sh redeploy <role> # Rebuild, upload & restart (server|node|client)
 #   bash deploy/aws-deploy.sh reload          # Push updated nodes.yaml + reload server
 #   bash deploy/aws-deploy.sh test            # Run integration test on client VM
+#   bash deploy/aws-deploy.sh openclaw [sub]  # Install/run OpenClaw in an agent VM
+#
+# OpenClaw subcommands:
+#   bash deploy/aws-deploy.sh openclaw install --api-key KEY [--provider anthropic|openai|xai|openrouter]
+#   bash deploy/aws-deploy.sh openclaw chat      # Interactive chat with OpenClaw
+#   bash deploy/aws-deploy.sh openclaw status    # Check OpenClaw + VM status
+#   bash deploy/aws-deploy.sh openclaw stop      # Stop OpenClaw, proxies, and the VM
+#   bash deploy/aws-deploy.sh openclaw reconfig --api-key KEY --provider openrouter --model anthropic/claude-3.5-haiku
 #
 # Prerequisites:
 #   - AWS CLI configured (aws sts get-caller-identity)
@@ -516,25 +525,81 @@ do_status() {
         err "No instances found in state file."
     fi
 
+    local key_file ip_server
+    key_file=$(load_state "key_file")
+    ip_server=$(load_state "ip_server")
+
     echo ""
     echo "Agent Testnet Status (${REGION})"
     echo "================================"
+    echo ""
 
+    # -- EC2 instances --
+    echo "Instances:"
+    printf "  %-8s  %-20s  %-16s  %-10s  %s\n" "ROLE" "INSTANCE" "IP" "EC2" "SERVICE"
+    printf "  %-8s  %-20s  %-16s  %-10s  %s\n" "--------" "--------------------" "----------------" "----------" "-------"
     for role in server node client; do
-        local inst_id ip state
+        local inst_id ip ec2_state svc_state svc_name
         inst_id=$(load_state "instance_${role}")
         ip=$(load_state "ip_${role}")
-        if [ -n "$inst_id" ]; then
-            state=$(aws ec2 describe-instances --region "$REGION" --instance-ids "$inst_id" \
-                --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "unknown")
-            printf "  %-8s  %-20s  %-16s  %s\n" "$role" "$inst_id" "$ip" "$state"
+        if [ -z "$inst_id" ]; then continue; fi
+
+        ec2_state=$(aws ec2 describe-instances --region "$REGION" --instance-ids "$inst_id" \
+            --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "unknown")
+
+        svc_name="testnet-${role}"
+        if [ "$ec2_state" = "running" ] && [ -f "$key_file" ]; then
+            svc_state=$(remote_exec "$ip" "$key_file" \
+                "systemctl is-active $svc_name 2>/dev/null || echo 'inactive'" 2>/dev/null) || svc_state="ssh-err"
+        else
+            svc_state="-"
         fi
+        printf "  %-8s  %-20s  %-16s  %-10s  %s\n" "$role" "$inst_id" "$ip" "$ec2_state" "$svc_state"
     done
 
-    local key_file
-    key_file=$(load_state "key_file")
+    # -- Registered nodes & domains (from server) --
+    if [ -n "$ip_server" ] && [ -f "$key_file" ]; then
+        local nodes_yaml
+        nodes_yaml=$(remote_exec "$ip_server" "$key_file" \
+            "sudo cat /opt/testnet/configs/nodes.yaml 2>/dev/null" 2>/dev/null) || true
+
+        if [ -n "$nodes_yaml" ]; then
+            echo ""
+            echo "Registered nodes (from server nodes.yaml):"
+            printf "  %-12s  %-24s  %s\n" "NAME" "ADDRESS" "DOMAINS"
+            printf "  %-12s  %-24s  %s\n" "------------" "------------------------" "-------"
+            echo "$nodes_yaml" | awk '
+                /- name:/    { if (name) printf "  %-12s  %-24s  %s\n", name, addr, domains;
+                               gsub(/.*name: *"?/, ""); gsub(/".*/, ""); name=$0; addr=""; domains="" }
+                /address:/   { gsub(/.*address: *"?/, ""); gsub(/".*/, ""); addr=$0 }
+                /^ *- "/ || /^ *- '\''/ { gsub(/.*- *"?/, ""); gsub(/".*/, ""); gsub(/'\''.*/, "");
+                               if (domains) domains = domains ", " $0; else domains=$0 }
+                END          { if (name) printf "  %-12s  %-24s  %s\n", name, addr, domains }
+            '
+        fi
+
+        # -- WireGuard peers (connected clients) --
+        echo ""
+        echo "WireGuard peers:"
+        remote_exec "$ip_server" "$key_file" \
+            "sudo wg show wg0 2>/dev/null | grep -E '(peer|endpoint|latest handshake|transfer)' | sed 's/^/  /'" 2>/dev/null || echo "  (no tunnel or wg not running)"
+
+        # -- Recent server log --
+        echo ""
+        echo "Server log (last 5 lines):"
+        remote_exec "$ip_server" "$key_file" \
+            "sudo journalctl -u testnet-server --no-pager -n 5 --output short-iso 2>/dev/null | sed 's/^/  /'" 2>/dev/null || echo "  (unavailable)"
+    fi
+
+    local join_token
+    join_token=$(load_state "join_token")
+    if [ -n "$join_token" ]; then
+        echo ""
+        echo "Join token: ${join_token}"
+    fi
+
     echo ""
-    echo "  SSH: ssh -i ${key_file} ubuntu@<IP>"
+    echo "SSH: ssh -i ${key_file} ubuntu@<IP>"
     echo ""
 }
 
@@ -634,6 +699,59 @@ do_restart() {
     else
         warn "${service_name} may not have started cleanly. Check: ssh -i ${key_file} ubuntu@${ip} 'sudo journalctl -u ${service_name} -f'"
     fi
+}
+
+# ---- redeploy ----
+
+do_redeploy() {
+    local role="${1:-}"
+    [ -n "$role" ] || err "Usage: $0 redeploy <server|node|client>"
+    [ -f "$STATE_FILE" ] || err "No state file. Run 'deploy' first."
+
+    local ip key_file
+    ip=$(load_state "ip_${role}")
+    key_file=$(load_state "key_file")
+    [ -n "$ip" ] || err "No IP found for role: ${role}"
+    [ -f "$key_file" ] || err "SSH key not found: ${key_file}"
+
+    local bin_name
+    case "$role" in
+        server) bin_name="testnet-server" ;;
+        node)   bin_name="testnet-node" ;;
+        client) bin_name="testnet-client" ;;
+        *)      err "Unknown role: ${role}. Use: server, node, client" ;;
+    esac
+
+    local bin_path="${DIST_DIR}/${bin_name}-linux-amd64"
+
+    command -v go >/dev/null 2>&1 || err "Go not found. Install Go 1.25+ or pre-build: make release"
+    info "Building ${bin_name} for linux/amd64..."
+    mkdir -p "$DIST_DIR"
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+        go build -ldflags="-s -w" -o "$bin_path" "${PROJECT_DIR}/cmd/${bin_name}"
+
+    info "Uploading ${bin_name} to ${role} (${ip})..."
+    remote_copy "$key_file" "$bin_path" "ubuntu@${ip}:/tmp/${bin_name}"
+    remote_exec "$ip" "$key_file" "
+        sudo mv /tmp/${bin_name} /usr/local/bin/${bin_name}
+        sudo chmod +x /usr/local/bin/${bin_name}
+    "
+
+    # Also upload toolkit when redeploying the node (matches initial deploy)
+    if [ "$role" = "node" ]; then
+        local toolkit_path="${DIST_DIR}/testnet-toolkit-linux-amd64"
+        if [ -f "$toolkit_path" ]; then
+            info "Uploading testnet-toolkit to node..."
+            remote_copy "$key_file" "$toolkit_path" "ubuntu@${ip}:/tmp/testnet-toolkit"
+            remote_exec "$ip" "$key_file" "
+                sudo mv /tmp/testnet-toolkit /usr/local/bin/testnet-toolkit
+                sudo chmod +x /usr/local/bin/testnet-toolkit
+            "
+        fi
+    fi
+
+    info "Restarting ${bin_name}..."
+    do_restart "$role"
 }
 
 # ---- test ----
@@ -758,6 +876,102 @@ do_teardown() {
     info "Teardown complete."
 }
 
+# ---- openclaw ----
+
+do_openclaw() {
+    local subcmd="${1:-install}"
+    shift || true
+
+    [ -f "$STATE_FILE" ] || err "No state file. Run 'deploy' first."
+
+    local ip_client key_file
+    ip_client=$(load_state "ip_client")
+    key_file=$(load_state "key_file")
+    [ -n "$ip_client" ] || err "No client IP in state file."
+    [ -f "$key_file" ] || err "SSH key not found: ${key_file}"
+
+    local oc_script="${PROJECT_DIR}/scripts/install-openclaw.sh"
+    [ -f "$oc_script" ] || err "Missing ${oc_script}"
+
+    # Upload the script (idempotent)
+    remote_copy "$key_file" "$oc_script" "ubuntu@${ip_client}:/tmp/install-openclaw.sh"
+
+    # Shared arg parser for install and reconfig
+    parse_openclaw_args() {
+        OC_API_KEY="${OPENCLAW_API_KEY:-${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-${OPENROUTER_API_KEY:-}}}}"
+        OC_PROVIDER=""
+        OC_MODEL=""
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --api-key)  OC_API_KEY="$2"; shift 2 ;;
+                --provider) OC_PROVIDER="$2"; shift 2 ;;
+                --model)    OC_MODEL="$2"; shift 2 ;;
+                *)          err "Unknown openclaw option: $1" ;;
+            esac
+        done
+    }
+
+    case "$subcmd" in
+        install)
+            parse_openclaw_args "$@"
+            [ -n "${OC_PROVIDER}" ] || OC_PROVIDER="anthropic"
+
+            [ -n "$OC_API_KEY" ] || err "API key required. Pass --api-key KEY or export OPENCLAW_API_KEY."
+
+            local extra_args="--provider ${OC_PROVIDER}"
+            [ -n "$OC_MODEL" ] && extra_args="${extra_args} --model ${OC_MODEL}"
+
+            info "Installing OpenClaw on client VM (${ip_client})..."
+            info "This will launch a Firecracker agent VM, install Node.js + OpenClaw,"
+            info "set up LLM API proxies, and start the gateway. This takes a few minutes."
+            echo ""
+
+            remote_exec "$ip_client" "$key_file" \
+                "OPENCLAW_API_KEY='${OC_API_KEY}' DEPLOY_MODE=1 sudo -E bash /tmp/install-openclaw.sh install ${extra_args}"
+            ;;
+
+        reconfig)
+            parse_openclaw_args "$@"
+
+            [ -n "$OC_API_KEY" ] || err "API key required. Pass --api-key KEY or export OPENCLAW_API_KEY / OPENROUTER_API_KEY."
+
+            local extra_args=""
+            [ -n "$OC_PROVIDER" ] && extra_args="--provider ${OC_PROVIDER}"
+            [ -n "$OC_MODEL" ] && extra_args="${extra_args} --model ${OC_MODEL}"
+
+            info "Reconfiguring OpenClaw on client VM (${ip_client})..."
+            remote_exec "$ip_client" "$key_file" \
+                "OPENCLAW_API_KEY='${OC_API_KEY}' sudo -E bash /tmp/install-openclaw.sh reconfig ${extra_args}"
+            ;;
+
+        chat)
+            info "Connecting to OpenClaw on client VM (${ip_client})..."
+            info "Press Ctrl+C to exit."
+            echo ""
+
+            # Interactive: needs -t for TTY pass-through across both SSH hops
+            # (local -> EC2 client -> install-openclaw.sh chat -> Firecracker VM)
+            exec ssh -o StrictHostKeyChecking=no -t -i "$key_file" "ubuntu@${ip_client}" \
+                "sudo bash /tmp/install-openclaw.sh chat"
+            ;;
+
+        status)
+            remote_exec "$ip_client" "$key_file" \
+                "sudo bash /tmp/install-openclaw.sh status"
+            ;;
+
+        stop)
+            info "Stopping OpenClaw on client VM (${ip_client})..."
+            remote_exec "$ip_client" "$key_file" \
+                "sudo bash /tmp/install-openclaw.sh stop"
+            ;;
+
+        *)
+            err "Unknown openclaw subcommand: ${subcmd}. Use: install, reconfig, chat, status, stop"
+            ;;
+    esac
+}
+
 # ---- main ----
 
 ACTION="${1:-}"
@@ -767,8 +981,10 @@ case "$ACTION" in
     status)   do_status ;;
     ssh)      do_ssh "${2:-}" ;;
     restart)  do_restart "${2:-}" ;;
+    redeploy) do_redeploy "${2:-}" ;;
     reload)   do_reload ;;
     test)     do_test ;;
-    "")       err "Usage: $0 <deploy|teardown|status|ssh|restart|reload|test>" ;;
-    *)        err "Unknown action: $ACTION. Use: deploy, teardown, status, ssh, restart, reload, test" ;;
+    openclaw) shift; do_openclaw "$@" ;;
+    "")       err "Usage: $0 <deploy|teardown|status|ssh|restart|redeploy|reload|test|openclaw>" ;;
+    *)        err "Unknown action: $ACTION. Use: deploy, teardown, status, ssh, restart, redeploy, reload, test, openclaw" ;;
 esac
