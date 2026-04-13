@@ -66,6 +66,15 @@ func SetupNetwork(agentID string, vmIndex int, serverTunnelIP, dnsIP, wgInterfac
 		// DROP everything else from/to this TAP
 		{"-A", "FORWARD", "-i", tapName, "-j", "DROP"},
 		{"-A", "FORWARD", "-o", tapName, "-j", "DROP"},
+
+		// Block VM from reaching host services (SSH, etc.) via the gateway IP.
+		// FORWARD rules only cover routed traffic; packets addressed directly
+		// to a TAP-interface IP hit the INPUT chain instead. Without this,
+		// the VM can probe any port the host listens on.
+		// Allow return traffic from host-initiated connections (e.g. SSH to VM).
+		{"-A", "INPUT", "-i", tapName, "-m", "conntrack",
+			"--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"},
+		{"-A", "INPUT", "-i", tapName, "-j", "DROP"},
 	}
 	for _, args := range rules {
 		if err := runIPTables(args...); err != nil {
@@ -115,6 +124,9 @@ func TeardownNetwork(cfg *NetworkConfig) {
 }
 
 func cleanupNetwork(tapName, guestIP, subnet, serverTunnelIP, wgInterface string) {
+	runIPTables("-D", "INPUT", "-i", tapName, "-j", "DROP")
+	runIPTables("-D", "INPUT", "-i", tapName, "-m", "conntrack",
+		"--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT")
 	runIPTables("-D", "FORWARD", "-i", tapName, "-s", guestIP+"/32",
 		"-d", "10.100.0.0/16", "-j", "ACCEPT")
 	runIPTables("-D", "FORWARD", "-i", tapName, "-s", guestIP+"/32",
