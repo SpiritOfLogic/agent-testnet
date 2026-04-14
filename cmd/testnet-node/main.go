@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/SpiritOfLogic/agent-testnet/pkg/api"
 )
@@ -107,6 +108,7 @@ func main() {
 	name := flag.String("name", "", "node name (as declared in nodes.yaml)")
 	secret := flag.String("secret", "", "per-node secret from nodes.yaml")
 	listenAddr := flag.String("listen", ":443", "address to listen on")
+	caFingerprint := flag.String("ca-fingerprint", "", "SHA-256 fingerprint of the server's TLS cert (hex) for bootstrap verification")
 	flag.Parse()
 
 	if *serverURL == "" || *name == "" || *secret == "" {
@@ -114,10 +116,30 @@ func main() {
 	}
 
 	log.Printf("Fetching TLS certificates from %s for node %s...", *serverURL, *name)
-	client := api.NewServerClient(*serverURL, nil)
-	certs, err := client.FetchNodeCerts(*name, *secret)
-	if err != nil {
-		log.Fatalf("Failed to fetch certs: %v", err)
+	var client *api.ServerClient
+	if *caFingerprint != "" {
+		client = api.NewServerClientWithFingerprint(*serverURL, *caFingerprint)
+	} else {
+		client = api.NewServerClient(*serverURL, nil)
+	}
+
+	var certs *api.CertResponse
+	maxRetries := 30
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		var fetchErr error
+		certs, fetchErr = client.FetchNodeCerts(*name, *secret)
+		if fetchErr == nil {
+			break
+		}
+		backoff := time.Duration(attempt) * 2 * time.Second
+		if backoff > 30*time.Second {
+			backoff = 30 * time.Second
+		}
+		log.Printf("Cert fetch attempt %d/%d failed: %v (retrying in %s)", attempt, maxRetries, fetchErr, backoff)
+		time.Sleep(backoff)
+	}
+	if certs == nil {
+		log.Fatalf("Failed to fetch certs after %d attempts", maxRetries)
 	}
 	log.Println("Certificates received.")
 
@@ -157,6 +179,10 @@ func main() {
 		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{tlsCert},
 		},
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	log.Printf("Testnet node %s listening on %s (HTTPS)", *name, *listenAddr)

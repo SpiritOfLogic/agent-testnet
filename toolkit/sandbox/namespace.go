@@ -133,10 +133,13 @@ func Run(cfg *Config) error {
 			// Copy the CA cert so it's available inside the namespace. Applications
 			// can reference it explicitly, or it can be injected into the system
 			// trust store via update-ca-certificates when the namespace has one.
-			destPath := destDir + "/ca.pem"
-			if data, err := os.ReadFile(cfg.CACertPath); err == nil {
-				os.WriteFile(destPath, data, 0o644)
+		destPath := destDir + "/ca.pem"
+		if data, err := os.ReadFile(cfg.CACertPath); err == nil {
+			if err := os.WriteFile(destPath, data, 0o644); err != nil {
+				cleanup()
+				return fmt.Errorf("write CA cert to namespace: %w", err)
 			}
+		}
 
 			// Try to install into the system trust store inside the namespace.
 			// This is best-effort: some base systems don't have update-ca-certificates.

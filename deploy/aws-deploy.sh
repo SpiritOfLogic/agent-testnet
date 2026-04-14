@@ -33,18 +33,22 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-STATE_FILE="${SCRIPT_DIR}/.aws-state.json"
 DIST_DIR="${PROJECT_DIR}/dist"
 
-REGION="${AWS_REGION:-$(aws configure get region 2>/dev/null || echo "eu-west-1")}"
+STACK_PREFIX="${STACK_PREFIX:-testnet}"
 STACK_TAG="testnet-stack"
-STACK_VALUE="agent-testnet"
+STACK_VALUE="${STACK_VALUE:-agent-testnet}"
+STATE_FILE="${STATE_FILE:-${SCRIPT_DIR}/.aws-state.json}"
+KEY_NAME="${KEY_NAME:-${STACK_PREFIX}-deploy-key}"
+KEY_FILE="${KEY_FILE:-${SCRIPT_DIR}/.aws-${STACK_PREFIX}-key.pem}"
+
+REGION="${AWS_REGION:-$(aws configure get region 2>/dev/null || echo "eu-west-1")}"
 
 INSTANCE_TYPE_SERVER="${INSTANCE_TYPE_SERVER:-t3a.nano}"
 INSTANCE_TYPE_NODE="${INSTANCE_TYPE_NODE:-t3a.nano}"
 INSTANCE_TYPE_CLIENT="${INSTANCE_TYPE_CLIENT:-m8i-flex.large}"
 
-NODES_YAML_SRC="${PROJECT_DIR}/configs/nodes.yaml"
+NODES_YAML_SRC="${NODES_YAML_SRC:-${PROJECT_DIR}/configs/nodes.yaml}"
 NODE_SECRET="$(head -c 16 /dev/urandom | base64 | tr -d '/+=' | head -c 24)"
 
 # ---- helpers ----
@@ -54,7 +58,7 @@ warn()  { printf "\033[1;33mWARN:\033[0m %s\n" "$*"; }
 err()   { printf "\033[1;31mERROR:\033[0m %s\n" "$*" >&2; exit 1; }
 
 tag_spec() {
-    echo "ResourceType=$1,Tags=[{Key=${STACK_TAG},Value=${STACK_VALUE}},{Key=Name,Value=testnet-$2}]"
+    echo "ResourceType=$1,Tags=[{Key=${STACK_TAG},Value=${STACK_VALUE}},{Key=Name,Value=${STACK_PREFIX}-$2}]"
 }
 
 save_state() {
@@ -95,7 +99,7 @@ wait_for_ssh() {
     local attempt=0
     info "Waiting for SSH on ${ip}..."
     while [ $attempt -lt $max_attempts ]; do
-        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes \
+        if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes \
             -i "$key" "ubuntu@${ip}" "echo ready" >/dev/null 2>&1; then
             return 0
         fi
@@ -109,14 +113,14 @@ remote_exec() {
     local ip="$1"
     local key="$2"
     shift 2
-    ssh -o StrictHostKeyChecking=no -o BatchMode=yes -i "$key" "ubuntu@${ip}" "$@"
+    ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -i "$key" "ubuntu@${ip}" "$@"
 }
 
 remote_copy() {
     local key="$1"
     local src="$2"
     local dest="$3"
-    scp -o StrictHostKeyChecking=no -o BatchMode=yes -i "$key" "$src" "$dest"
+    scp -o StrictHostKeyChecking=accept-new -o BatchMode=yes -i "$key" "$src" "$dest"
 }
 
 # ---- deploy ----
@@ -144,6 +148,18 @@ do_deploy() {
         if [ -n "$existing_vpc" ]; then
             err "Active deployment found (VPC: ${existing_vpc}). Run 'teardown' first or delete ${STATE_FILE}."
         fi
+    fi
+
+    # Check for orphaned VPCs with our stack tag that aren't tracked by a state file.
+    local orphan_vpcs
+    orphan_vpcs=$(aws ec2 describe-vpcs --region "$REGION" \
+        --filters "Name=tag:${STACK_TAG},Values=${STACK_VALUE}" \
+        --query 'Vpcs[*].VpcId' --output text 2>/dev/null || true)
+    if [ -n "$orphan_vpcs" ] && [ "$orphan_vpcs" != "None" ]; then
+        warn "Found existing VPC(s) tagged ${STACK_TAG}=${STACK_VALUE}: ${orphan_vpcs}"
+        warn "These may be orphaned from a previous deploy. Clean them up manually or"
+        warn "use a different STACK_VALUE to avoid conflicts."
+        warn "Continuing deploy with new resources..."
     fi
 
     # Build Linux amd64 binaries if missing
@@ -231,7 +247,7 @@ do_deploy() {
     info "Creating security groups..."
     SG_SERVER=$(aws ec2 create-security-group \
         --region "$REGION" \
-        --group-name "testnet-server-sg" \
+        --group-name "${STACK_PREFIX}-server-sg" \
         --description "Testnet server: API + WireGuard + DNS" \
         --vpc-id "$VPC_ID" \
         --tag-specifications "$(tag_spec security-group server-sg)" \
@@ -253,7 +269,7 @@ do_deploy() {
     # Security group: node
     SG_NODE=$(aws ec2 create-security-group \
         --region "$REGION" \
-        --group-name "testnet-node-sg" \
+        --group-name "${STACK_PREFIX}-node-sg" \
         --description "Testnet node: HTTPS" \
         --vpc-id "$VPC_ID" \
         --tag-specifications "$(tag_spec security-group node-sg)" \
@@ -272,7 +288,7 @@ do_deploy() {
     # Security group: client
     SG_CLIENT=$(aws ec2 create-security-group \
         --region "$REGION" \
-        --group-name "testnet-client-sg" \
+        --group-name "${STACK_PREFIX}-client-sg" \
         --description "Testnet client: SSH only" \
         --vpc-id "$VPC_ID" \
         --tag-specifications "$(tag_spec security-group client-sg)" \
@@ -284,23 +300,22 @@ do_deploy() {
         --port "22-22" --cidr "0.0.0.0/0" >/dev/null
 
     # SSH key pair
-    KEY_FILE="${SCRIPT_DIR}/.aws-testnet-key.pem"
     if [ ! -f "$KEY_FILE" ]; then
         info "Creating SSH key pair..."
-        aws ec2 delete-key-pair --region "$REGION" --key-name "testnet-deploy-key" >/dev/null 2>&1 || true
+        aws ec2 delete-key-pair --region "$REGION" --key-name "$KEY_NAME" >/dev/null 2>&1 || true
         aws ec2 create-key-pair \
             --region "$REGION" \
-            --key-name "testnet-deploy-key" \
+            --key-name "$KEY_NAME" \
             --key-type ed25519 \
             --tag-specifications "$(tag_spec key-pair deploy-key)" \
             --query 'KeyMaterial' --output text > "$KEY_FILE"
         chmod 600 "$KEY_FILE"
     else
         info "Using existing SSH key: ${KEY_FILE}"
-        aws ec2 describe-key-pairs --region "$REGION" --key-names "testnet-deploy-key" >/dev/null 2>&1 || \
+        aws ec2 describe-key-pairs --region "$REGION" --key-names "$KEY_NAME" >/dev/null 2>&1 || \
             err "Key file exists but key pair not in AWS. Delete ${KEY_FILE} and re-run."
     fi
-    save_state "key_name" "testnet-deploy-key"
+    save_state "key_name" "$KEY_NAME"
     save_state "key_file" "$KEY_FILE"
 
     # Launch instances
@@ -317,7 +332,7 @@ do_deploy() {
             --region "$REGION" \
             --image-id "$AMI_ID" \
             --instance-type "$itype" \
-            --key-name "testnet-deploy-key" \
+            --key-name "$KEY_NAME" \
             --subnet-id "$SUBNET_ID" \
             --security-group-ids "$sg" \
             --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":20,"VolumeType":"gp3"}}]' \
@@ -442,11 +457,21 @@ do_deploy() {
         all_healthy=false
     fi
 
-    # Node: systemd active
-    if remote_exec "$IP_NODE" "$KEY_FILE" "sudo systemctl is-active --quiet testnet-node" 2>/dev/null; then
+    # Node: systemd active (retry up to 60s — the node fetches TLS certs from
+    # the server on first boot, which may need several attempts)
+    local node_ok=false
+    for _ in $(seq 1 12); do
+        if remote_exec "$IP_NODE" "$KEY_FILE" "sudo systemctl is-active --quiet testnet-node" 2>/dev/null; then
+            node_ok=true
+            break
+        fi
+        sleep 5
+    done
+    if $node_ok; then
         info "  Node: healthy"
     else
         warn "  Node: testnet-node service not active"
+        warn "        Check: ssh -i ${KEY_FILE} ubuntu@${IP_NODE} 'sudo journalctl -u testnet-node --no-pager -n 30'"
         all_healthy=false
     fi
 
@@ -591,6 +616,11 @@ do_status() {
             "sudo journalctl -u testnet-server --no-pager -n 5 --output short-iso 2>/dev/null | sed 's/^/  /'" 2>/dev/null || echo "  (unavailable)"
     fi
 
+    if [ -n "$ip_server" ]; then
+        echo ""
+        echo "Server URL: https://${ip_server}:8443"
+    fi
+
     local join_token
     join_token=$(load_state "join_token")
     if [ -n "$join_token" ]; then
@@ -617,7 +647,7 @@ do_ssh() {
     [ -n "$ip" ] || err "No IP found for role: ${role}"
     [ -f "$key_file" ] || err "SSH key not found: ${key_file}"
 
-    exec ssh -o StrictHostKeyChecking=no -i "$key_file" "ubuntu@${ip}"
+    exec ssh -o StrictHostKeyChecking=accept-new -i "$key_file" "ubuntu@${ip}"
 }
 
 # ---- reload ----
@@ -788,24 +818,38 @@ do_teardown() {
     fi
 
     info "Tearing down Agent Testnet in ${REGION}..."
+    local teardown_errors=0
 
-    # Terminate instances
+    # Terminate instances (including any extra tagged instances in this VPC)
+    local vpc_id
+    vpc_id=$(load_state "vpc_id")
+
+    local all_instances=""
     for role in server node client; do
         local inst_id
         inst_id=$(load_state "instance_${role}")
         if [ -n "$inst_id" ]; then
             info "Terminating ${role} instance: ${inst_id}..."
             aws ec2 terminate-instances --region "$REGION" --instance-ids "$inst_id" >/dev/null 2>&1 || true
+            all_instances="${all_instances} ${inst_id}"
         fi
     done
 
-    # Wait for termination
-    local all_instances=""
-    for role in server node client; do
-        local inst_id
-        inst_id=$(load_state "instance_${role}")
-        [ -n "$inst_id" ] && all_instances="${all_instances} ${inst_id}"
-    done
+    # Also terminate any other instances in this VPC (e.g. manually launched ones)
+    if [ -n "$vpc_id" ]; then
+        local extra_instances
+        extra_instances=$(aws ec2 describe-instances --region "$REGION" \
+            --filters "Name=vpc-id,Values=${vpc_id}" "Name=instance-state-name,Values=running,stopped,pending" \
+            --query 'Reservations[*].Instances[*].InstanceId' --output text 2>/dev/null || true)
+        for inst_id in $extra_instances; do
+            if ! echo "$all_instances" | grep -q "$inst_id"; then
+                info "Terminating extra instance: ${inst_id}..."
+                aws ec2 terminate-instances --region "$REGION" --instance-ids "$inst_id" >/dev/null 2>&1 || true
+                all_instances="${all_instances} ${inst_id}"
+            fi
+        done
+    fi
+
     if [ -n "$all_instances" ]; then
         info "Waiting for instances to terminate..."
         aws ec2 wait instance-terminated --region "$REGION" --instance-ids $all_instances 2>/dev/null || true
@@ -819,13 +863,19 @@ do_teardown() {
         aws ec2 delete-key-pair --region "$REGION" --key-name "$key_name" 2>/dev/null || true
     fi
 
-    # Delete security groups
+    # Delete security groups (retry once -- ENIs can take a moment to detach)
     for sg_key in sg_server sg_node sg_client; do
         local sg_id
         sg_id=$(load_state "$sg_key")
         if [ -n "$sg_id" ]; then
             info "Deleting security group: ${sg_id}..."
-            aws ec2 delete-security-group --region "$REGION" --group-id "$sg_id" 2>/dev/null || true
+            if ! aws ec2 delete-security-group --region "$REGION" --group-id "$sg_id" 2>/dev/null; then
+                sleep 5
+                if ! aws ec2 delete-security-group --region "$REGION" --group-id "$sg_id" 2>/dev/null; then
+                    warn "Failed to delete security group ${sg_id}"
+                    teardown_errors=$((teardown_errors + 1))
+                fi
+            fi
         fi
     done
 
@@ -834,46 +884,79 @@ do_teardown() {
     subnet_id=$(load_state "subnet_id")
     if [ -n "$subnet_id" ]; then
         info "Deleting subnet: ${subnet_id}..."
-        aws ec2 delete-subnet --region "$REGION" --subnet-id "$subnet_id" 2>/dev/null || true
+        if ! aws ec2 delete-subnet --region "$REGION" --subnet-id "$subnet_id" 2>/dev/null; then
+            warn "Failed to delete subnet ${subnet_id}"
+            teardown_errors=$((teardown_errors + 1))
+        fi
     fi
 
-    # Delete route table
+    # Disassociate and delete route table
     local rtb_id
     rtb_id=$(load_state "rtb_id")
     if [ -n "$rtb_id" ]; then
+        # Disassociate any non-main associations before deletion
+        local assoc_ids
+        assoc_ids=$(aws ec2 describe-route-tables --region "$REGION" --route-table-ids "$rtb_id" \
+            --query 'RouteTables[0].Associations[?Main!=`true`].RouteTableAssociationId' --output text 2>/dev/null || true)
+        for assoc in $assoc_ids; do
+            [ "$assoc" = "None" ] && continue
+            info "Disassociating route table: ${assoc}..."
+            aws ec2 disassociate-route-table --region "$REGION" --association-id "$assoc" 2>/dev/null || true
+        done
         info "Deleting route table: ${rtb_id}..."
-        aws ec2 delete-route-table --region "$REGION" --route-table-id "$rtb_id" 2>/dev/null || true
+        if ! aws ec2 delete-route-table --region "$REGION" --route-table-id "$rtb_id" 2>/dev/null; then
+            warn "Failed to delete route table ${rtb_id}"
+            teardown_errors=$((teardown_errors + 1))
+        fi
     fi
 
     # Detach and delete internet gateway
-    local igw_id vpc_id
+    local igw_id
     igw_id=$(load_state "igw_id")
-    vpc_id=$(load_state "vpc_id")
     if [ -n "$igw_id" ] && [ -n "$vpc_id" ]; then
         info "Detaching internet gateway: ${igw_id}..."
         aws ec2 detach-internet-gateway --region "$REGION" --internet-gateway-id "$igw_id" --vpc-id "$vpc_id" 2>/dev/null || true
     fi
     if [ -n "$igw_id" ]; then
         info "Deleting internet gateway: ${igw_id}..."
-        aws ec2 delete-internet-gateway --region "$REGION" --internet-gateway-id "$igw_id" 2>/dev/null || true
+        if ! aws ec2 delete-internet-gateway --region "$REGION" --internet-gateway-id "$igw_id" 2>/dev/null; then
+            warn "Failed to delete internet gateway ${igw_id}"
+            teardown_errors=$((teardown_errors + 1))
+        fi
     fi
 
-    # Delete VPC
+    # Delete VPC and verify
     if [ -n "$vpc_id" ]; then
         info "Deleting VPC: ${vpc_id}..."
-        aws ec2 delete-vpc --region "$REGION" --vpc-id "$vpc_id" 2>/dev/null || true
+        if ! aws ec2 delete-vpc --region "$REGION" --vpc-id "$vpc_id" 2>/dev/null; then
+            warn "Failed to delete VPC ${vpc_id} -- checking for remaining dependencies..."
+            # List what's blocking deletion
+            local remaining
+            remaining=$(aws ec2 describe-vpc-attribute --region "$REGION" --vpc-id "$vpc_id" --attribute enableDnsSupport 2>/dev/null && echo "VPC still exists" || echo "")
+            if [ -n "$remaining" ]; then
+                warn "VPC ${vpc_id} still exists. Manual cleanup required."
+                warn "Run: aws ec2 describe-vpc-attribute --region $REGION --vpc-id $vpc_id"
+                teardown_errors=$((teardown_errors + 1))
+            fi
+        fi
     fi
 
-    # Clean up local state
+    # Only clean up local state if teardown fully succeeded
     local key_file
     key_file=$(load_state "key_file")
-    if [ -n "$key_file" ] && [ -f "$key_file" ]; then
-        rm -f "$key_file"
-        info "Removed SSH key: ${key_file}"
+    if [ "$teardown_errors" -eq 0 ]; then
+        if [ -n "$key_file" ] && [ -f "$key_file" ]; then
+            rm -f "$key_file"
+            info "Removed SSH key: ${key_file}"
+        fi
+        rm -f "$STATE_FILE"
+        info "Teardown complete."
+    else
+        warn "Teardown completed with ${teardown_errors} error(s)."
+        warn "State file preserved: ${STATE_FILE}"
+        warn "Re-run 'teardown' after manually resolving the above issues."
+        exit 1
     fi
-    rm -f "$STATE_FILE"
-
-    info "Teardown complete."
 }
 
 # ---- openclaw ----
@@ -951,7 +1034,7 @@ do_openclaw() {
 
             # Interactive: needs -t for TTY pass-through across both SSH hops
             # (local -> EC2 client -> install-openclaw.sh chat -> Firecracker VM)
-            exec ssh -o StrictHostKeyChecking=no -t -i "$key_file" "ubuntu@${ip_client}" \
+            exec ssh -o StrictHostKeyChecking=accept-new -t -i "$key_file" "ubuntu@${ip_client}" \
                 "sudo bash /tmp/install-openclaw.sh chat"
             ;;
 

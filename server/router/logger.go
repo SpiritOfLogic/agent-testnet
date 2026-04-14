@@ -55,7 +55,7 @@ func (l *Logger) Start(ctx context.Context) {
 		return
 	}
 
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("[logger] failed to open log file: %v", err)
 		return

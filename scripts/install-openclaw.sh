@@ -514,7 +514,11 @@ CRCONF
       "--ignore-certificate-errors",
       "--disable-gpu",
       "--disable-dev-shm-usage"
-    ]
+    ],
+    "ssrfPolicy": {
+      "allowPrivateNetwork": true,
+      "dangerouslyAllowPrivateNetwork": true
+    }
   },
   "skills": {
     "allowBundled": []
@@ -783,7 +787,11 @@ do_reconfig() {
       "--ignore-certificate-errors",
       "--disable-gpu",
       "--disable-dev-shm-usage"
-    ]
+    ],
+    "ssrfPolicy": {
+      "allowPrivateNetwork": true,
+      "dangerouslyAllowPrivateNetwork": true
+    }
   },
   "skills": {
     "allowBundled": []

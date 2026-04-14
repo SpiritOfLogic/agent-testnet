@@ -1,5 +1,6 @@
 .PHONY: build build-server build-client build-node build-toolkit build-linux \
-       rootfs download-kernel run-server smoke release clean
+       rootfs download-kernel run-server smoke release clean \
+       test test-smoke test-e2e
 
 BIN_DIR := ./bin
 GO := go
@@ -50,6 +51,17 @@ release:
 
 release-rootfs:
 	bash scripts/build-release.sh --rootfs
+
+test:
+	$(GO) test ./...
+
+test-smoke: build
+	@echo "Running smoke test..."
+	bash scripts/smoke-test.sh
+
+test-e2e:
+	@echo "Running AWS E2E test (requires AWS credentials)..."
+	bash tests/e2e/aws-e2e-test.sh
 
 clean:
 	rm -rf $(BIN_DIR) build-linux/ dist/ data/

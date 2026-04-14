@@ -65,6 +65,13 @@ func (r *Registry) RegisterClient(joinToken, wgPubKey string) (*api.Client, stri
 	return client, apiToken, nil
 }
 
+// DeregisterClient removes a client from the store, freeing its slot.
+func (r *Registry) DeregisterClient(clientID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.store.RemoveClient(clientID)
+}
+
 // ValidateAPIToken checks an API token against the store.
 func (r *Registry) ValidateAPIToken(token string) (string, bool) {
 	hash := HashToken(token)

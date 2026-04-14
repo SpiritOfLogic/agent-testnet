@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/SpiritOfLogic/agent-testnet/pkg/api"
 	"github.com/SpiritOfLogic/agent-testnet/pkg/config"
@@ -30,6 +31,7 @@ type ControlPlane struct {
 	mux      *http.ServeMux
 	wgPubKey string       // set by WireGuard endpoint after init
 	peerMgr  PeerManager  // set after WG endpoint init
+	limiter  *rateLimiter
 }
 
 // New initializes all control plane components.
@@ -78,12 +80,11 @@ func New(cfg *config.ServerConfig) (*ControlPlane, error) {
 		nodes:    nodes,
 		vipAlloc: vipAlloc,
 		registry: registry,
+		limiter:  newRateLimiter(20, time.Minute),
 	}
 	cp.setupRoutes()
 
-	token := auth.JoinToken()
-	log.Printf("[controlplane] join token: %s...%s (full token in %s/join-token)",
-		token[:4], token[len(token)-4:], cfg.ControlPlane.DataDir)
+	log.Printf("[controlplane] join token available at %s/join-token", cfg.ControlPlane.DataDir)
 	return cp, nil
 }
 
@@ -116,19 +117,28 @@ func (cp *ControlPlane) setupRoutes() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/v1/ca/root", cp.handleGetCACert)
-	mux.HandleFunc("POST /api/v1/clients/register", cp.handleRegister)
-	mux.HandleFunc("GET /api/v1/nodes/{name}/certs", cp.handleGetNodeCerts)
+	mux.HandleFunc("POST /api/v1/clients/register", cp.limiter.wrap(cp.handleRegister))
+	mux.HandleFunc("GET /api/v1/nodes/{name}/certs", cp.limiter.wrap(cp.handleGetNodeCerts))
 	mux.HandleFunc("GET /api/v1/nodes", cp.handleListNodes)
 	mux.HandleFunc("GET /api/v1/domains", cp.handleListDomains)
+	mux.HandleFunc("DELETE /api/v1/clients/self", cp.limiter.wrap(cp.handleDeregister))
+	mux.HandleFunc("POST /api/v1/admin/rotate-join-token", cp.limiter.wrap(cp.handleRotateJoinToken))
 
 	cp.mux = mux
 }
 
+// Handler returns the HTTP handler for the control plane (useful for testing).
+func (cp *ControlPlane) Handler() http.Handler { return cp.mux }
+
 // ListenAndServe starts the HTTPS API server.
 func (cp *ControlPlane) ListenAndServe() error {
 	server := &http.Server{
-		Addr:    cp.cfg.ControlPlane.Listen,
-		Handler: cp.mux,
+		Addr:              cp.cfg.ControlPlane.Listen,
+		Handler:           cp.mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	log.Printf("[controlplane] listening on %s (HTTPS)", cp.cfg.ControlPlane.Listen)
 	return server.ListenAndServeTLS(cp.cfg.ControlPlane.TLS.CertFile, cp.cfg.ControlPlane.TLS.KeyFile)
@@ -170,9 +180,10 @@ func (cp *ControlPlane) handleRegister(w http.ResponseWriter, r *http.Request) {
 	client, apiToken, err := cp.registry.RegisterClient(token, req.WGPublicKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid join token") {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+			http.Error(w, "invalid join token", http.StatusUnauthorized)
 		} else {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("[controlplane] registration error: %v", err)
+			http.Error(w, "registration failed", http.StatusInternalServerError)
 		}
 		return
 	}
@@ -215,7 +226,8 @@ func (cp *ControlPlane) handleGetNodeCerts(w http.ResponseWriter, r *http.Reques
 
 	certPEM, keyPEM, err := cp.ca.IssueCert(name, node.Domains)
 	if err != nil {
-		http.Error(w, "cert generation failed: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("[controlplane] cert generation failed for node %s: %v", name, err)
+		http.Error(w, "cert generation failed", http.StatusInternalServerError)
 		return
 	}
 
@@ -260,6 +272,50 @@ func extractBearerToken(r *http.Request) string {
 		return strings.TrimPrefix(auth, "Bearer ")
 	}
 	return ""
+}
+
+func (cp *ControlPlane) handleDeregister(w http.ResponseWriter, r *http.Request) {
+	token := extractBearerToken(r)
+	if token == "" {
+		http.Error(w, "missing API token", http.StatusUnauthorized)
+		return
+	}
+	clientID, ok := cp.registry.ValidateAPIToken(token)
+	if !ok {
+		http.Error(w, "invalid API token", http.StatusUnauthorized)
+		return
+	}
+
+	if err := cp.registry.DeregisterClient(clientID); err != nil {
+		log.Printf("[controlplane] deregistration error for %s: %v", clientID, err)
+		http.Error(w, "deregistration failed", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("[controlplane] deregistered client %s", clientID)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deregistered"})
+}
+
+func (cp *ControlPlane) handleRotateJoinToken(w http.ResponseWriter, r *http.Request) {
+	token := extractBearerToken(r)
+	if token == "" {
+		http.Error(w, "missing join token", http.StatusUnauthorized)
+		return
+	}
+	if !cp.auth.ValidateJoinToken(token) {
+		http.Error(w, "invalid join token", http.StatusUnauthorized)
+		return
+	}
+
+	newToken, err := cp.auth.RotateJoinToken()
+	if err != nil {
+		log.Printf("[controlplane] join token rotation error: %v", err)
+		http.Error(w, "token rotation failed", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("[controlplane] join token rotated")
+	writeJSON(w, http.StatusOK, map[string]string{"join_token": newToken})
 }
 
 func isValidWGKey(key string) bool {

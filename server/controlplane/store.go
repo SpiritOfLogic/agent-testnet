@@ -99,6 +99,25 @@ func (s *Store) AddClient(c *api.Client, tokenHash string) error {
 	return s.flush()
 }
 
+// RemoveClient removes a client and its API token from the store.
+func (s *Store) RemoveClient(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.clients[id]; !exists {
+		return fmt.Errorf("client %s not found", id)
+	}
+
+	for hash, cid := range s.tokens {
+		if cid == id {
+			delete(s.tokens, hash)
+			break
+		}
+	}
+	delete(s.clients, id)
+	return s.flush()
+}
+
 func (s *Store) GetClient(id string) *api.Client {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

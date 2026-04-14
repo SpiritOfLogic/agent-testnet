@@ -92,6 +92,11 @@ func (v *VM) Start() error {
 	)
 
 	configPath := filepath.Join(v.sockDir, "config.json")
+	mac, err := generateMAC()
+	if err != nil {
+		return fmt.Errorf("generate guest MAC: %w", err)
+	}
+
 	configJSON := fmt.Sprintf(`{
   "boot-source": {
     "kernel_image_path": %q,
@@ -117,7 +122,7 @@ func (v *VM) Start() error {
       "host_dev_name": %q
     }
   ]
-}`, v.cfg.KernelPath, bootArgs, vmRootFS, v.cfg.VCPU, v.cfg.MemMB, generateMAC(), v.cfg.TAPDevice)
+}`, v.cfg.KernelPath, bootArgs, vmRootFS, v.cfg.VCPU, v.cfg.MemMB, mac, v.cfg.TAPDevice)
 
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o644); err != nil {
 		return fmt.Errorf("write VM config: %w", err)
@@ -208,11 +213,13 @@ func (v *VM) prepareRootFS() (string, error) {
 }
 
 // generateMAC returns a random locally-administered unicast MAC address.
-func generateMAC() string {
+func generateMAC() (string, error) {
 	var b [6]byte
-	rand.Read(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("generate MAC address: %w", err)
+	}
 	b[0] = (b[0] | 0x02) & 0xFE // locally administered, unicast
-	return fmt.Sprintf("%02X:%02X:%02X:%02X:%02X:%02X", b[0], b[1], b[2], b[3], b[4], b[5])
+	return fmt.Sprintf("%02X:%02X:%02X:%02X:%02X:%02X", b[0], b[1], b[2], b[3], b[4], b[5]), nil
 }
 
 func copyFile(src, dst string) error {

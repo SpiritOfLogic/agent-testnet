@@ -19,8 +19,9 @@ const wgInterfaceName = "wg-testnet"
 
 func newSetupCmd() *cobra.Command {
 	var (
-		serverURL string
-		joinToken string
+		serverURL     string
+		joinToken     string
+		caFingerprint string
 	)
 
 	cmd := &cobra.Command{
@@ -46,7 +47,12 @@ func newSetupCmd() *cobra.Command {
 			fmt.Printf("  Public key: %s\n", pubKey)
 
 			fmt.Printf("Registering with server at %s...\n", serverURL)
-			client := api.NewServerClient(serverURL, nil)
+			var client *api.ServerClient
+			if caFingerprint != "" {
+				client = api.NewServerClientWithFingerprint(serverURL, caFingerprint)
+			} else {
+				client = api.NewServerClient(serverURL, nil)
+			}
 			resp, err := client.Register(joinToken, &api.RegisterRequest{
 				WGPublicKey: pubKey,
 			})
@@ -165,6 +171,7 @@ sandbox:
 
 	cmd.Flags().StringVar(&serverURL, "server-url", "", "testnet server URL (https://...)")
 	cmd.Flags().StringVar(&joinToken, "join-token", "", "join token from server")
+	cmd.Flags().StringVar(&caFingerprint, "ca-fingerprint", "", "SHA-256 fingerprint of server TLS cert (hex) for bootstrap verification")
 	return cmd
 }
 

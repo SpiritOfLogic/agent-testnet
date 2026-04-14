@@ -3,6 +3,7 @@ package controlplane
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -55,21 +56,41 @@ func (a *Auth) JoinToken() string {
 	return a.joinToken
 }
 
-// ValidateJoinToken checks the client join token.
+// ValidateJoinToken checks the client join token using constant-time comparison
+// to prevent timing side-channel attacks.
 func (a *Auth) ValidateJoinToken(token string) bool {
-	return token != "" && token == a.joinToken
+	if token == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(token), []byte(a.joinToken)) == 1
 }
 
-// ValidateNodeSecret checks a node's per-node secret from nodes.yaml.
+// ValidateNodeSecret checks a node's per-node secret using constant-time
+// comparison to prevent timing side-channel attacks.
 func (a *Auth) ValidateNodeSecret(name, secret string) bool {
-	if a.nodes == nil {
+	if a.nodes == nil || secret == "" {
 		return false
 	}
 	node := a.nodes.GetNode(name)
-	if node == nil {
+	if node == nil || node.Secret == "" {
 		return false
 	}
-	return node.Secret != "" && node.Secret == secret
+	return subtle.ConstantTimeCompare([]byte(secret), []byte(node.Secret)) == 1
+}
+
+// RotateJoinToken generates a new join token and persists it, invalidating
+// the previous token. Returns the new token.
+func (a *Auth) RotateJoinToken() (string, error) {
+	token, err := generateToken(32)
+	if err != nil {
+		return "", fmt.Errorf("generate join token: %w", err)
+	}
+	tokenPath := filepath.Join(a.dataDir, "join-token")
+	if err := os.WriteFile(tokenPath, []byte(token), 0o600); err != nil {
+		return "", fmt.Errorf("persist join token: %w", err)
+	}
+	a.joinToken = token
+	return token, nil
 }
 
 // IssueAPIToken generates a new API token and returns (token, sha256Hash).

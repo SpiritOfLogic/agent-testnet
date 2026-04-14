@@ -2,13 +2,16 @@ package api
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strings"
 )
 
 // ServerClient is a Go client for the testnet-server control plane API.
@@ -21,15 +24,31 @@ type ServerClient struct {
 // NewServerClient creates a client that trusts the given CA cert (PEM).
 // If caCert is nil, TLS verification is skipped (bootstrap only — the first
 // call should be to fetch the CA cert, which is then used for all subsequent
-// requests).
+// requests). Prefer NewServerClientWithFingerprint for bootstrap connections.
 func NewServerClient(baseURL string, caCert []byte) *ServerClient {
+	return newServerClient(baseURL, caCert, "")
+}
+
+// NewServerClientWithFingerprint creates a bootstrap client that verifies the
+// server's TLS certificate matches the expected SHA-256 fingerprint. This
+// mitigates MITM during the initial CA cert fetch when no CA cert is available
+// yet. The fingerprint should be the hex-encoded SHA-256 hash of the server's
+// DER-encoded TLS certificate.
+func NewServerClientWithFingerprint(baseURL string, caFingerprint string) *ServerClient {
+	return newServerClient(baseURL, nil, caFingerprint)
+}
+
+func newServerClient(baseURL string, caCert []byte, caFingerprint string) *ServerClient {
 	tlsCfg := &tls.Config{}
 	if caCert != nil {
 		pool := x509.NewCertPool()
 		pool.AppendCertsFromPEM(caCert)
 		tlsCfg.RootCAs = pool
+	} else if caFingerprint != "" {
+		tlsCfg.InsecureSkipVerify = true
+		tlsCfg.VerifyPeerCertificate = fingerprintVerifier(caFingerprint)
 	} else {
-		log.Printf("[api] WARNING: TLS verification disabled (no CA cert) — only safe for initial bootstrap")
+		log.Printf("[api] WARNING: TLS verification disabled (no CA cert or fingerprint) — only safe for initial bootstrap")
 		tlsCfg.InsecureSkipVerify = true
 	}
 
@@ -38,6 +57,25 @@ func NewServerClient(baseURL string, caCert []byte) *ServerClient {
 		HTTPClient: &http.Client{
 			Transport: &http.Transport{TLSClientConfig: tlsCfg},
 		},
+	}
+}
+
+// fingerprintVerifier returns a TLS VerifyPeerCertificate function that checks
+// that at least one certificate in the chain matches the expected SHA-256 fingerprint.
+func fingerprintVerifier(expected string) func([][]byte, [][]*x509.Certificate) error {
+	expected = strings.ToLower(strings.ReplaceAll(expected, ":", ""))
+	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		if len(rawCerts) == 0 {
+			return fmt.Errorf("server presented no TLS certificates")
+		}
+		for _, raw := range rawCerts {
+			hash := sha256.Sum256(raw)
+			fp := hex.EncodeToString(hash[:])
+			if fp == expected {
+				return nil
+			}
+		}
+		return fmt.Errorf("server certificate fingerprint does not match expected value")
 	}
 }
 

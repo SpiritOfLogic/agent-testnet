@@ -1,6 +1,6 @@
 module github.com/SpiritOfLogic/agent-testnet
 
-go 1.25.0
+go 1.25.9
 
 require (
 	github.com/miekg/dns v1.1.61
