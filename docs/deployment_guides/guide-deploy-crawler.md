@@ -2,7 +2,7 @@
 
 Step-by-step guide for deploying a search engine on the agent testnet. This is an **active node** -- it both serves search results to agents and crawls other testnet services to build its index. The crawler runs inside `testnet-toolkit sandbox run` to ensure it can only reach testnet services.
 
-For background on how nodes, DNS, and TLS work, see the [Node Development Guide](node-development.md). For `testnet-toolkit` flag details, see the [Toolkit Reference](toolkit-reference.md). For architecture rationale, see the [Node Toolkit Design](node-toolkit-design.md).
+For background on how nodes, DNS, and TLS work, see the [Node Development Guide](../node-development.md). For `testnet-toolkit` flag details, see the [Toolkit Reference](../toolkit-reference.md). For architecture rationale, see the [Node Toolkit Design](../design_documents/node-toolkit-design.md).
 
 ## Prerequisites
 
@@ -65,7 +65,7 @@ Address = FIRST_IP_IN_TUNNEL_CIDR/24
 [Peer]
 PublicKey = SERVER_WG_PUBLIC_KEY
 Endpoint = SERVER_PUBLIC_IP:51820
-AllowedIPs = 10.99.0.0/16, 10.100.0.0/16
+AllowedIPs = 10.99.0.0/16, 83.150.0.0/16
 PersistentKeepalive = 25
 EOF
 
@@ -84,7 +84,7 @@ Verify connectivity:
 
 ```bash
 # Can we reach testnet DNS?
-dig @10.100.0.1 search.testnet
+dig @83.150.0.1 search.testnet
 
 # Can we reach a VIP? (if other nodes are running)
 curl --cacert /etc/testnet/certs/ca.pem https://some-other-node.testnet/health
@@ -157,7 +157,7 @@ The sandbox confines the crawler to testnet-only networking. It can only resolve
 
 ```bash
 sudo testnet-toolkit sandbox run \
-  --dns-ip 10.100.0.1 \
+  --dns-ip 83.150.0.1 \
   --ca-cert /etc/testnet/certs/ca.pem \
   --wg-interface wg0 \
   -- /usr/local/bin/my-crawler \
@@ -166,9 +166,9 @@ sudo testnet-toolkit sandbox run \
 ```
 
 What happens inside the sandbox:
-- DNS queries go to testnet DNS at 10.100.0.1
+- DNS queries go to testnet DNS at 83.150.0.1
 - HTTPS requests use the testnet CA for verification
-- Only traffic to `10.100.0.0/16` (VIPs) and `10.99.0.0/16` (tunnel) is allowed
+- Only traffic to `83.150.0.0/16` (VIPs) and `10.99.0.0/16` (tunnel) is allowed
 - All other outbound traffic is dropped by iptables
 - If the crawler encounters a link to `external-site.com`, DNS returns NXDOMAIN
 
@@ -180,7 +180,7 @@ If you don't have a custom crawler binary, `wget` can mirror testnet sites:
 # Crawl each seed URL
 while read url; do
   sudo testnet-toolkit sandbox run \
-    --dns-ip 10.100.0.1 \
+    --dns-ip 83.150.0.1 \
     --ca-cert /etc/testnet/certs/ca.pem \
     -- wget --mirror --no-parent --convert-links \
       --ca-certificate=/etc/testnet/certs/ca.pem \
@@ -231,7 +231,7 @@ cat > /etc/cron.d/testnet-crawl << 'EOF'
 0 * * * * root /usr/local/bin/testnet-toolkit seed urls --server-url https://SERVER_IP:8443 --api-token API_TOKEN --exclude-node search > /var/lib/search/seeds.txt
 
 # Re-crawl every 2 hours
-0 */2 * * * root /usr/local/bin/testnet-toolkit sandbox run --dns-ip 10.100.0.1 --ca-cert /etc/testnet/certs/ca.pem --wg-interface wg0 -- /usr/local/bin/my-crawler --seeds /var/lib/search/seeds.txt --index /var/lib/search/index.db
+0 */2 * * * root /usr/local/bin/testnet-toolkit sandbox run --dns-ip 83.150.0.1 --ca-cert /etc/testnet/certs/ca.pem --wg-interface wg0 -- /usr/local/bin/my-crawler --seeds /var/lib/search/seeds.txt --index /var/lib/search/index.db
 EOF
 ```
 
@@ -262,7 +262,7 @@ Verify the WireGuard tunnel is up and DNS is reachable:
 sudo wg show wg0
 
 # Test DNS through the tunnel
-dig @10.100.0.1 reddit.com
+dig @83.150.0.1 reddit.com
 
 # If DNS fails, check the tunnel has traffic flowing
 sudo wg show wg0 | grep "latest handshake"

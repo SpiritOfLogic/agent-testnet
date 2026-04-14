@@ -14,7 +14,7 @@
 #   5. Starts the OpenClaw gateway
 #
 # How the proxy works:
-#   Agent VMs can only forward traffic to testnet VIPs (10.100.0.0/16).
+#   Agent VMs can only forward traffic to testnet VIPs (83.150.0.0/16).
 #   However, traffic to the host's TAP gateway IP is LOCAL (hits the INPUT
 #   chain, not FORWARD), so it bypasses sandbox restrictions. We add extra
 #   IPs to the TAP device and run socat TCP proxies on each — the VM sees
@@ -514,11 +514,7 @@ CRCONF
       "--ignore-certificate-errors",
       "--disable-gpu",
       "--disable-dev-shm-usage"
-    ],
-    "ssrfPolicy": {
-      "allowPrivateNetwork": true,
-      "dangerouslyAllowPrivateNetwork": true
-    }
+    ]
   },
   "skills": {
     "allowBundled": []
@@ -787,11 +783,7 @@ do_reconfig() {
       "--ignore-certificate-errors",
       "--disable-gpu",
       "--disable-dev-shm-usage"
-    ],
-    "ssrfPolicy": {
-      "allowPrivateNetwork": true,
-      "dangerouslyAllowPrivateNetwork": true
-    }
+    ]
   },
   "skills": {
     "allowBundled": []

@@ -34,7 +34,7 @@ func TestNodeManager_Load(t *testing.T) {
 	dir := t.TempDir()
 	fp := writeNodesFile(t, dir, testNodesYAML)
 
-	vipAlloc, err := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	vipAlloc, err := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestNodeManager_AutoName(t *testing.T) {
 	dir := t.TempDir()
 	fp := writeNodesFile(t, dir, testNodesYAML)
 
-	vipAlloc, err := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	vipAlloc, err := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestNodeManager_Validation_DuplicateName(t *testing.T) {
 `
 	dir := t.TempDir()
 	fp := writeNodesFile(t, dir, yaml)
-	vipAlloc, _ := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	vipAlloc, _ := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	nm := NewNodeManager(fp, vipAlloc)
 	err := nm.Load()
 	if err == nil {
@@ -136,7 +136,7 @@ func TestNodeManager_Validation_MissingAddress(t *testing.T) {
 `
 	dir := t.TempDir()
 	fp := writeNodesFile(t, dir, yaml)
-	vipAlloc, _ := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	vipAlloc, _ := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	nm := NewNodeManager(fp, vipAlloc)
 	err := nm.Load()
 	if err == nil {
@@ -155,7 +155,7 @@ func TestNodeManager_Validation_InvalidAddress(t *testing.T) {
 `
 	dir := t.TempDir()
 	fp := writeNodesFile(t, dir, yaml)
-	vipAlloc, _ := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	vipAlloc, _ := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	nm := NewNodeManager(fp, vipAlloc)
 	err := nm.Load()
 	if err == nil {
@@ -173,7 +173,7 @@ func TestNodeManager_Validation_MissingName(t *testing.T) {
 `
 	dir := t.TempDir()
 	fp := writeNodesFile(t, dir, yaml)
-	vipAlloc, _ := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	vipAlloc, _ := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	nm := NewNodeManager(fp, vipAlloc)
 	err := nm.Load()
 	if err == nil {
@@ -199,7 +199,7 @@ func TestNodeManager_Validation_DuplicateDomain(t *testing.T) {
 `
 	dir := t.TempDir()
 	fp := writeNodesFile(t, dir, yaml)
-	vipAlloc, _ := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	vipAlloc, _ := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	nm := NewNodeManager(fp, vipAlloc)
 	err := nm.Load()
 	if err == nil {
@@ -214,7 +214,7 @@ func TestNodeManager_Reload(t *testing.T) {
 	dir := t.TempDir()
 	fp := writeNodesFile(t, dir, testNodesYAML)
 
-	vipAlloc, err := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	vipAlloc, err := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestNodeManager_AllDomainMappings(t *testing.T) {
 	dir := t.TempDir()
 	fp := writeNodesFile(t, dir, testNodesYAML)
 
-	vipAlloc, err := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	vipAlloc, err := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestNodeManager_VIPToAddress(t *testing.T) {
 	dir := t.TempDir()
 	fp := writeNodesFile(t, dir, testNodesYAML)
 
-	vipAlloc, err := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	vipAlloc, err := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestNodeManager_VIPToAddress(t *testing.T) {
 }
 
 func TestNodeManager_FileNotFound(t *testing.T) {
-	vipAlloc, _ := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	vipAlloc, _ := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	nm := NewNodeManager("/nonexistent/nodes.yaml", vipAlloc)
 	if err := nm.Load(); err == nil {
 		t.Fatal("expected error for missing file")

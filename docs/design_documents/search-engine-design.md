@@ -126,10 +126,10 @@ Authorization: Bearer <api_token>
 
 Response:
 [
-  { "domain": "google.com",      "vip": "10.100.0.2", "node": "example-node" },
-  { "domain": "www.google.com",  "vip": "10.100.0.2", "node": "example-node" },
-  { "domain": "forum.testnet",   "vip": "10.100.0.3", "node": "forum" },
-  { "domain": "search.testnet",  "vip": "10.100.0.4", "node": "search" }
+  { "domain": "google.com",      "vip": "83.150.0.2", "node": "example-node" },
+  { "domain": "www.google.com",  "vip": "83.150.0.2", "node": "example-node" },
+  { "domain": "forum.testnet",   "vip": "83.150.0.3", "node": "forum" },
+  { "domain": "search.testnet",  "vip": "83.150.0.4", "node": "search" }
 ]
 ```
 
@@ -145,7 +145,7 @@ The crawler must:
 The crawler's HTTP client must be configured for the testnet environment. It cannot use the system's default DNS or CA trust store -- it must use the testnet's.
 
 - **TLS**: Trust only the testnet root CA. Build a `tls.Config` with a `RootCAs` pool containing the CA cert from bootstrap. Do not fall back to the system CA store.
-- **DNS**: Resolve domains through the testnet DNS, reachable via the WireGuard tunnel. The DNS VIP address comes from the client registration response (`dns_ip` field, typically `10.100.0.1`). Use a custom `net.Resolver` with a `Dialer` pointed at `{dns_ip}:53`, and wire it into the HTTP transport's `DialContext`.
+- **DNS**: Resolve domains through the testnet DNS, reachable via the WireGuard tunnel. The DNS VIP address comes from the client registration response (`dns_ip` field, typically `83.150.0.1`). Use a custom `net.Resolver` with a `Dialer` pointed at `{dns_ip}:53`, and wire it into the HTTP transport's `DialContext`.
 - **Timeouts**: Set reasonable timeouts (e.g. 10s connect, 30s total) since all nodes are on a low-latency network.
 
 ```go
@@ -343,7 +343,7 @@ The binary should accept all configuration via command-line flags and/or environ
 | `--secret` | `NODE_SECRET` | (required) | Node secret from nodes.yaml |
 | `--listen` | `LISTEN_ADDR` | `:443` | HTTPS listen address |
 | `--data-dir` | `DATA_DIR` | `./data` | Directory for SQLite database and persisted state |
-| `--dns-ip` | `DNS_IP` | `10.100.0.1` | Testnet DNS address (used for crawl resolution) |
+| `--dns-ip` | `DNS_IP` | `83.150.0.1` | Testnet DNS address (used for crawl resolution) |
 | `--api-token` | `API_TOKEN` | (see below) | API token for authenticated control plane calls |
 | `--join-token` | `JOIN_TOKEN` | (see below) | Client join token for WireGuard registration |
 | `--crawl-interval` | `CRAWL_INTERVAL` | `1h` | Time between full re-crawls |
@@ -454,7 +454,7 @@ Address = 10.99.X.1/24              # first usable IP in tunnel_cidr (e.g. if tu
 [Peer]
 PublicKey = <server_wg_public_key from response>
 Endpoint = SERVER_PUBLIC_IP:51820    # server's real public IP, WireGuard port
-AllowedIPs = 10.99.0.0/16, 10.100.0.0/16
+AllowedIPs = 10.99.0.0/16, 83.150.0.0/16
 PersistentKeepalive = 25
 ```
 
@@ -468,7 +468,7 @@ Verify connectivity:
 
 ```bash
 # Should resolve testnet domains
-dig @10.100.0.1 google.com
+dig @83.150.0.1 google.com
 ```
 
 ### Start the binary

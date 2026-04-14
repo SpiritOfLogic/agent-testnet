@@ -19,7 +19,7 @@ Every testnet node must satisfy two requirements:
 
 Additionally, **active nodes** (like a search engine) that make outbound requests must:
 
-3. **Resolve DNS** via testnet DNS only (typically `10.100.0.1:53`).
+3. **Resolve DNS** via testnet DNS only (typically `83.150.0.1:53`).
 4. **Trust the testnet CA** for outbound HTTPS, not the system CA store.
 5. **Discover testnet domains** to know what exists and seed outbound work (crawling, etc.).
 
@@ -119,7 +119,7 @@ Runs a process inside a network environment where it can only reach the testnet.
 
 ```bash
 testnet-toolkit sandbox run \
-  --dns-ip 10.100.0.1 \
+  --dns-ip 83.150.0.1 \
   --ca-cert /etc/testnet/certs/ca.pem \
   --wg-interface wg0 \
   -- yacy /opt/yacy
@@ -129,7 +129,7 @@ The sandbox:
 
 1. Creates a Linux network namespace for the child process.
 2. Sets up a `veth` pair connecting the namespace to the host.
-3. Configures routing inside the namespace so only VIP traffic (`10.100.0.0/16`) and DNS traffic reach the WireGuard tunnel.
+3. Configures routing inside the namespace so only VIP traffic (`83.150.0.0/16`) and DNS traffic reach the WireGuard tunnel.
 4. Writes `/etc/resolv.conf` inside the namespace pointing to testnet DNS.
 5. Installs the testnet CA cert into the namespace's system trust store (`/usr/local/share/ca-certificates/`).
 6. Drops all other outbound traffic via iptables.
@@ -147,7 +147,7 @@ testnet-toolkit certs fetch --server-url ... --name ... --secret ... --out-dir /
 
 # Run the app in a testnet-confined container
 docker run \
-  --dns 10.100.0.1 \
+  --dns 83.150.0.1 \
   --dns-search testnet \
   -v /etc/testnet/certs/ca.pem:/usr/local/share/ca-certificates/testnet.crt \
   --add-host=host.docker.internal:host-gateway \
@@ -161,10 +161,10 @@ Where `testnet-only` is a Docker network routed through the WireGuard interface.
 
 | Flag | Env var | Default | Description |
 |------|---------|---------|-------------|
-| `--dns-ip` | `DNS_IP` | `10.100.0.1` | Testnet DNS address |
+| `--dns-ip` | `DNS_IP` | `83.150.0.1` | Testnet DNS address |
 | `--ca-cert` | `CA_CERT_PATH` | `/etc/testnet/certs/ca.pem` | Testnet CA cert to install in the namespace |
 | `--wg-interface` | `WG_INTERFACE` | `wg0` | WireGuard interface to route through |
-| `--allowed-cidrs` | `ALLOWED_CIDRS` | `10.100.0.0/16,10.99.0.0/16` | CIDRs reachable from the sandbox |
+| `--allowed-cidrs` | `ALLOWED_CIDRS` | `83.150.0.0/16,10.99.0.0/16` | CIDRs reachable from the sandbox |
 
 #### Implementation
 
@@ -217,7 +217,7 @@ Or integrate directly into a crawl loop:
 ```bash
 # Crawl all testnet sites using wget, confined to the sandbox
 testnet-toolkit seed urls --server-url ... --api-token ... --exclude-node search | while read url; do
-  testnet-toolkit sandbox run --dns-ip 10.100.0.1 --ca-cert /etc/testnet/certs/ca.pem \
+  testnet-toolkit sandbox run --dns-ip 83.150.0.1 --ca-cert /etc/testnet/certs/ca.pem \
     -- wget --mirror --no-parent "$url" -P /var/lib/search-index/
 done
 ```
@@ -507,7 +507,7 @@ testnet-toolkit seed urls \
 
 # Run the crawler confined to the testnet
 testnet-toolkit sandbox run \
-  --dns-ip 10.100.0.1 \
+  --dns-ip 83.150.0.1 \
   --ca-cert /etc/testnet/certs/ca.pem \
   --wg-interface wg0 \
   -- /usr/local/bin/my-crawler --seeds /var/lib/search/seeds.txt --index /var/lib/search/index.db
@@ -519,7 +519,7 @@ The crawler -- whatever it is -- runs inside the sandbox. It can only resolve te
 
 ```bash
 # Cron: refresh seeds and re-crawl every hour
-0 * * * * root testnet-toolkit seed urls --server-url ... --api-token ... --exclude-node search > /var/lib/search/seeds.txt && testnet-toolkit sandbox run --dns-ip 10.100.0.1 --ca-cert /etc/testnet/certs/ca.pem -- /usr/local/bin/my-crawler --seeds /var/lib/search/seeds.txt --index /var/lib/search/index.db
+0 * * * * root testnet-toolkit seed urls --server-url ... --api-token ... --exclude-node search > /var/lib/search/seeds.txt && testnet-toolkit sandbox run --dns-ip 83.150.0.1 --ca-cert /etc/testnet/certs/ca.pem -- /usr/local/bin/my-crawler --seeds /var/lib/search/seeds.txt --index /var/lib/search/index.db
 ```
 
 ## Documentation

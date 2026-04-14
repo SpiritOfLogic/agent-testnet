@@ -227,7 +227,7 @@ controlplane:
     cert_file: "/opt/testnet/data/ca-cert.pem"
 
 dns:
-  listen_tunnel: "10.100.0.1:53"
+  listen_tunnel: "83.150.0.1:53"
   listen_public: ":5353"
   refresh_interval: "10s"
 
@@ -240,8 +240,8 @@ router:
   log_file: "/opt/testnet/data/traffic.log"
 
 vip:
-  subnet: "10.100.0.0/16"
-  dns_vip: "10.100.0.1"
+  subnet: "83.150.0.0/16"
+  dns_vip: "83.150.0.1"
 YAML
         info "Created ${CONFIG_DIR}/server.yaml"
     fi

@@ -5,7 +5,7 @@ Deploy [Roundcube](https://roundcube.net/) webmail backed by [docker-mailserver]
 Background reading (in the [agent-testnet](https://github.com/SpiritOfLogic/agent-testnet) repo):
 - [Node Development Guide](https://github.com/SpiritOfLogic/agent-testnet/blob/main/docs/node-development.md) -- testnet architecture, what nodes are, how DNS/VIP/TLS work
 - [Node Toolkit](https://github.com/SpiritOfLogic/agent-testnet/blob/main/docs/node-toolkit-design.md) -- the `testnet-toolkit` CLI and build-vs-reuse analysis
-- [Toolkit Quickstart](https://github.com/SpiritOfLogic/agent-testnet/blob/main/docs/guide-toolkit-quickstart.md) -- how to download and use `testnet-toolkit`
+- [Toolkit Reference](https://github.com/SpiritOfLogic/agent-testnet/blob/main/docs/toolkit-reference.md) -- how to download and use `testnet-toolkit`
 
 ## Testnet overview
 
@@ -17,9 +17,9 @@ Three roles:
 - **Client** -- Runs agent VMs. Each VM is network-isolated and can only reach testnet services.
 - **Node** -- Any HTTPS service that agents can interact with. Registered in the server's `nodes.yaml` with a name, address, shared secret, and list of domain names to impersonate.
 
-When an agent visits `gmail.com`: testnet DNS resolves it to a Virtual IP (VIP) in `10.100.0.0/16`, traffic travels through the WireGuard tunnel to the server, and the server uses DNAT to forward it to the mail node's real public IP. The agent never knows it's on a testnet.
+When an agent visits `gmail.com`: testnet DNS resolves it to a Virtual IP (VIP) in `83.150.0.0/16`, traffic travels through the WireGuard tunnel to the server, and the server uses DNAT to forward it to the mail node's real public IP. The agent never knows it's on a testnet.
 
-Every node must serve HTTPS using certificates issued by the testnet's private CA (fetched via [`testnet-toolkit certs fetch`](https://github.com/SpiritOfLogic/agent-testnet/blob/main/docs/guide-toolkit-quickstart.md)). The CA cert is injected into agent VMs so they trust these connections. Public CAs are not trusted inside agent VMs.
+Every node must serve HTTPS using certificates issued by the testnet's private CA (fetched via [`testnet-toolkit certs fetch`](https://github.com/SpiritOfLogic/agent-testnet/blob/main/docs/toolkit-reference.md)). The CA cert is injected into agent VMs so they trust these connections. Public CAs are not trusted inside agent VMs.
 
 ## Motivation
 

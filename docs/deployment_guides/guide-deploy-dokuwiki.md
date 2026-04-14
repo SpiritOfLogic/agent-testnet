@@ -2,7 +2,7 @@
 
 Step-by-step guide for deploying [DokuWiki](https://www.dokuwiki.org/) on the agent testnet, impersonating `en.wikipedia.org`. DokuWiki is a flat-file PHP wiki with no database dependency -- one of the lightest services to deploy.
 
-For background on how nodes, DNS, and TLS work, see the [Node Development Guide](node-development.md). For `testnet-toolkit` flag details, see the [Toolkit Reference](toolkit-reference.md).
+For background on how nodes, DNS, and TLS work, see the [Node Development Guide](../node-development.md). For `testnet-toolkit` flag details, see the [Toolkit Reference](../toolkit-reference.md).
 
 ## Prerequisites
 

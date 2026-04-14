@@ -251,13 +251,13 @@ echo ""
 echo "--- DNS Tests (declared domains) ---"
 
 for domain in "${DECLARED_DOMAINS[@]}"; do
-    check_output "DNS: ${domain} resolves to a VIP (10.100.x.x)" "10\.100\." \
-        vm_ssh "nslookup ${domain} 2>/dev/null | grep -o '10\.100\.[0-9]*\.[0-9]*'"
+    check_output "DNS: ${domain} resolves to a VIP (83.150.x.x)" "83\.150\." \
+        vm_ssh "nslookup ${domain} 2>/dev/null | grep -o '83\.150\.[0-9]*\.[0-9]*'"
 done
 
 for autoname in "${AUTO_NAMES[@]}"; do
-    check_output "DNS: ${autoname} (auto-name) resolves to a VIP" "10\.100\." \
-        vm_ssh "nslookup ${autoname} 2>/dev/null | grep -o '10\.100\.[0-9]*\.[0-9]*'"
+    check_output "DNS: ${autoname} (auto-name) resolves to a VIP" "83\.150\." \
+        vm_ssh "nslookup ${autoname} 2>/dev/null | grep -o '83\.150\.[0-9]*\.[0-9]*'"
 done
 
 echo ""

@@ -240,7 +240,7 @@ Address = %s/24
 [Peer]
 PublicKey = %s
 Endpoint = %s
-AllowedIPs = 10.99.0.0/16, 10.100.0.0/16
+AllowedIPs = 10.99.0.0/16, 83.150.0.0/16
 PersistentKeepalive = 25
 `, state.WGPrivKey, clientIP.String(), state.ServerWGKey, d.serverEndpoint())
 

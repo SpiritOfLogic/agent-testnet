@@ -78,7 +78,7 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!DOCTYPE html>
 
   <div class="card">
     <h2>Network model</h2>
-    <p>Each declared domain gets a Virtual IP in <code>10.100.0.0/16</code>.
+    <p>Each declared domain gets a Virtual IP in <code>83.150.0.0/16</code>.
     Testnet DNS resolves only declared domains; everything else returns NXDOMAIN.
     A WireGuard tunnel is the sole egress path from agent VMs, and server-side
     iptables DNAT maps VIPs to real node addresses.</p>

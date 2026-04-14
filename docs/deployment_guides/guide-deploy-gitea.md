@@ -2,7 +2,7 @@
 
 Step-by-step guide for deploying [Gitea](https://gitea.io/) on the agent testnet, impersonating `github.com`. Agents interact with it as if it were GitHub -- Git clone/push/pull operations are protocol-identical, and the web UI is similar enough for agents to navigate.
 
-For background on how nodes, DNS, and TLS work, see the [Node Development Guide](node-development.md). For `testnet-toolkit` flag details, see the [Toolkit Reference](toolkit-reference.md).
+For background on how nodes, DNS, and TLS work, see the [Node Development Guide](../node-development.md). For `testnet-toolkit` flag details, see the [Toolkit Reference](../toolkit-reference.md).
 
 ## Prerequisites
 

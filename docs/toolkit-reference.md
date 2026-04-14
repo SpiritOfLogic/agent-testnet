@@ -2,18 +2,29 @@
 
 Composable CLI tools for integrating services with the agent testnet. A single binary with three subcommand groups: **certs**, **seed**, and **sandbox**.
 
-For design rationale and architecture context, see [Node Toolkit Design](node-toolkit-design.md). For step-by-step deployment walkthroughs, see the deployment guides:
+For design rationale and architecture context, see [Node Toolkit Design](design_documents/node-toolkit-design.md). For step-by-step deployment walkthroughs, see the deployment guides:
 
-- [Deploy Gitea as GitHub](guide-deploy-gitea.md)
-- [Deploy DokuWiki as Wikipedia](guide-deploy-dokuwiki.md)
-- [Deploy a search engine with sandboxed crawler](guide-deploy-crawler.md)
+- [Deploy Gitea as GitHub](deployment_guides/guide-deploy-gitea.md)
+- [Deploy DokuWiki as Wikipedia](deployment_guides/guide-deploy-dokuwiki.md)
+- [Deploy a search engine with sandboxed crawler](deployment_guides/guide-deploy-crawler.md)
 
 ## Installation
+
+### From release
+
+```bash
+curl -fsSL https://github.com/SpiritOfLogic/agent-testnet/releases/latest/download/testnet-toolkit-linux-amd64 \
+  -o /usr/local/bin/testnet-toolkit
+chmod +x /usr/local/bin/testnet-toolkit
+```
+
+For arm64 hosts, replace `amd64` with `arm64`.
+
+If you deploy using `install.sh` with the `node` role, the toolkit is installed automatically.
 
 ### From source
 
 ```bash
-# Clone and build
 git clone https://github.com/SpiritOfLogic/agent-testnet.git
 cd agent-testnet
 make build-toolkit
@@ -22,16 +33,60 @@ make build-toolkit
 sudo cp bin/testnet-toolkit /usr/local/bin/
 ```
 
-### From release
-
-Download the `testnet-toolkit` binary from the [releases page](https://github.com/SpiritOfLogic/agent-testnet/releases) and place it in your `$PATH`.
-
 ### Cross-compile for Linux (from macOS)
 
 ```bash
 make build-linux
 # Binary is at ./build-linux/testnet-toolkit
 ```
+
+## Quick Start
+
+The three things most nodes need: fetch TLS certs, discover domains, and (optionally) sandbox outbound traffic. All flags can also be set via environment variables.
+
+**1. Fetch TLS certificates**
+
+```bash
+testnet-toolkit certs fetch \
+  --server-url https://SERVER_IP:8443 \
+  --name search \
+  --secret YOUR_NODE_SECRET \
+  --out-dir /etc/testnet/certs
+```
+
+This writes `cert.pem`, `key.pem`, and `ca.pem` to the output directory. Point your HTTPS server at `cert.pem` and `key.pem`. Use `ca.pem` when making outbound requests to other testnet nodes.
+
+**2. Discover testnet domains**
+
+```bash
+testnet-toolkit seed urls \
+  --server-url https://SERVER_IP:8443 \
+  --api-token YOUR_API_TOKEN \
+  --exclude-node search
+```
+
+Outputs one URL per line, ready to pipe into a crawler.
+
+**3. Sandbox outbound traffic** (optional, for active nodes)
+
+```bash
+sudo testnet-toolkit sandbox run \
+  --dns-ip 83.150.0.1 \
+  --ca-cert /etc/testnet/certs/ca.pem \
+  -- /usr/local/bin/my-crawler --seeds /var/lib/seeds.txt
+```
+
+Creates a network namespace where only testnet VIPs are routable.
+
+### Quick reference
+
+| Command | What it does |
+|---------|-------------|
+| `testnet-toolkit certs fetch` | Fetch TLS cert + key + CA from the control plane |
+| `testnet-toolkit seed urls` | List all testnet URLs (for crawl seeds) |
+| `testnet-toolkit seed domains` | List all testnet domain names |
+| `testnet-toolkit seed json` | Full domain list as JSON |
+| `testnet-toolkit sandbox run -- CMD` | Run a process confined to testnet network only |
 
 ## Global flags
 
@@ -206,12 +261,12 @@ Output:
 [
   {
     "domain": "reddit.com",
-    "vip": "10.100.0.2",
+    "vip": "83.150.0.2",
     "node": "forum"
   },
   {
     "domain": "github.com",
-    "vip": "10.100.0.3",
+    "vip": "83.150.0.3",
     "node": "gitea"
   }
 ]
@@ -256,10 +311,10 @@ Everything after `--` is the command to execute inside the sandbox.
 
 | Flag | Env var | Default | Description |
 |------|---------|---------|-------------|
-| `--dns-ip` | `DNS_IP` | `10.100.0.1` | Testnet DNS address |
+| `--dns-ip` | `DNS_IP` | `83.150.0.1` | Testnet DNS address |
 | `--ca-cert` | `CA_CERT_PATH` | `/etc/testnet/certs/ca.pem` | Testnet CA cert to install in the namespace |
 | `--wg-interface` | `WG_INTERFACE` | `wg0` | WireGuard interface to route traffic through |
-| `--allowed-cidrs` | `ALLOWED_CIDRS` | `10.100.0.0/16,10.99.0.0/16` | Comma-separated CIDRs reachable from the sandbox |
+| `--allowed-cidrs` | `ALLOWED_CIDRS` | `83.150.0.0/16,10.99.0.0/16` | Comma-separated CIDRs reachable from the sandbox |
 
 ### What the sandbox does
 
@@ -278,7 +333,7 @@ Run a crawler confined to the testnet:
 
 ```bash
 testnet-toolkit sandbox run \
-  --dns-ip 10.100.0.1 \
+  --dns-ip 83.150.0.1 \
   --ca-cert /etc/testnet/certs/ca.pem \
   --wg-interface wg0 \
   -- /usr/local/bin/my-crawler --seeds /var/lib/seeds.txt
@@ -305,7 +360,7 @@ For apps that ship as Docker images, network confinement can be achieved with Do
 
 ```bash
 docker run \
-  --dns 10.100.0.1 \
+  --dns 83.150.0.1 \
   --dns-search testnet \
   -v /etc/testnet/certs/ca.pem:/usr/local/share/ca-certificates/testnet.crt \
   --network=testnet-only \
@@ -339,3 +394,11 @@ The sandbox provides **network-level confinement**, not full process isolation. 
 - **Cannot** resolve DNS names that the testnet DNS doesn't know about
 
 For full filesystem isolation, combine with Docker or a chroot.
+
+---
+
+## Further reading
+
+- [Node Development Guide](node-development.md) -- architecture, API, and how nodes work
+- [Node Toolkit Design](design_documents/node-toolkit-design.md) -- design rationale and architecture context
+- [Deploy Script Conventions](deploy-script-conventions.md) -- standard AWS deploy script structure

@@ -113,13 +113,13 @@ The server re-reads `nodes.yaml` on reload (SIGHUP), allocates VIPs for new node
 | `testnet-toolkit seed urls\|domains\|json` | Discover testnet domains and output seed URLs for crawlers |
 | `testnet-toolkit sandbox run` | Run a process confined to testnet-only networking |
 
-See the [Toolkit Reference](docs/toolkit-reference.md) for full usage and the [Node Toolkit Design](docs/node-toolkit-design.md) for architecture rationale.
+See the [Toolkit Reference](docs/toolkit-reference.md) for full usage and the [Node Toolkit Design](docs/design_documents/node-toolkit-design.md) for architecture rationale.
 
 **Deployment guides:**
 
-- [Deploy Gitea as GitHub](docs/guide-deploy-gitea.md)
-- [Deploy DokuWiki as Wikipedia](docs/guide-deploy-dokuwiki.md)
-- [Deploy a search engine with sandboxed crawler](docs/guide-deploy-crawler.md)
+- [Deploy Gitea as GitHub](docs/deployment_guides/guide-deploy-gitea.md)
+- [Deploy DokuWiki as Wikipedia](docs/deployment_guides/guide-deploy-dokuwiki.md)
+- [Deploy a search engine with sandboxed crawler](docs/deployment_guides/guide-deploy-crawler.md)
 
 ## Local Development
 
@@ -142,7 +142,7 @@ make smoke
 
 ## Network Model
 
-- Each declared domain gets a Virtual IP (VIP) in `10.100.0.0/16`
+- Each declared domain gets a Virtual IP (VIP) in `83.150.0.0/16`
 - Testnet DNS resolves declared domains to VIPs; returns NXDOMAIN for undeclared domains
 - WireGuard tunnel (`10.99.0.0/16`) is the sole egress path from agent VMs
 - Server-side iptables DNAT maps VIPs to real node IPs
@@ -187,13 +187,11 @@ scripts/
   build-release.sh      Cross-compiles release artifacts
   smoke-test.sh         API-level smoke test suite
 docs/
-  testnet_mvp_design.md   Architecture design document
-  node-development.md     Guide for building testnet nodes
-  node-toolkit-design.md  Toolkit design: build-vs-reuse analysis
-  toolkit-reference.md    testnet-toolkit CLI reference
-  guide-deploy-gitea.md   Deploy Gitea as GitHub
-  guide-deploy-dokuwiki.md Deploy DokuWiki as Wikipedia
-  guide-deploy-crawler.md Deploy search engine with sandboxed crawler
+  node-development.md              Guide for building testnet nodes
+  toolkit-reference.md             testnet-toolkit CLI reference
+  deploy-script-conventions.md     AWS deploy script standard for all repos
+  design_documents/                Architecture and design docs
+  deployment_guides/               Step-by-step deployment walkthroughs
 ```
 
 ## Network Requirements

@@ -4,11 +4,13 @@
 #
 # Usage:
 #   bash deploy/aws-deploy.sh deploy          # Create infrastructure + deploy
-#   bash deploy/aws-deploy.sh teardown        # Destroy all resources
+#   bash deploy/aws-deploy.sh teardown        # Soft teardown (keeps EIP + data volumes)
+#   bash deploy/aws-deploy.sh teardown --full # Full teardown (destroys everything)
 #   bash deploy/aws-deploy.sh status          # Show instance IPs and status
 #   bash deploy/aws-deploy.sh ssh <role>      # SSH into server|node|client
 #   bash deploy/aws-deploy.sh restart <role>  # Restart a service (server|node|client)
 #   bash deploy/aws-deploy.sh redeploy <role> # Rebuild, upload & restart (server|node|client)
+#   bash deploy/aws-deploy.sh logs <role>     # Tail service logs (server|node|client)
 #   bash deploy/aws-deploy.sh reload          # Push updated nodes.yaml + reload server
 #   bash deploy/aws-deploy.sh test            # Run integration test on client VM
 #   bash deploy/aws-deploy.sh openclaw [sub]  # Install/run OpenClaw in an agent VM
@@ -97,6 +99,8 @@ wait_for_ssh() {
     local key="$2"
     local max_attempts=40
     local attempt=0
+    # EIP reuse means the host key changes on each new instance
+    ssh-keygen -R "$ip" >/dev/null 2>&1 || true
     info "Waiting for SSH on ${ip}..."
     while [ $attempt -lt $max_attempts ]; do
         if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes \
@@ -121,6 +125,129 @@ remote_copy() {
     local src="$2"
     local dest="$3"
     scp -o StrictHostKeyChecking=accept-new -o BatchMode=yes -i "$key" "$src" "$dest"
+}
+
+# ---- persistent resources (survive teardown) ----
+
+ensure_eip() {
+    local alloc_id
+    alloc_id=$(load_state "eip_alloc_id")
+    if [ -n "$alloc_id" ]; then
+        if aws ec2 describe-addresses --region "$REGION" --allocation-ids "$alloc_id" >/dev/null 2>&1; then
+            EIP_ALLOC="$alloc_id"
+            EIP_PUBLIC=$(aws ec2 describe-addresses --region "$REGION" --allocation-ids "$alloc_id" \
+                --query 'Addresses[0].PublicIp' --output text)
+            info "Reusing Elastic IP: ${EIP_PUBLIC} (${EIP_ALLOC})"
+            return
+        fi
+        warn "EIP ${alloc_id} from state no longer exists, allocating new one..."
+    fi
+
+    info "Allocating Elastic IP for server..."
+    EIP_ALLOC=$(aws ec2 allocate-address --region "$REGION" --domain vpc \
+        --tag-specifications "$(tag_spec elastic-ip server-eip)" \
+        --query 'AllocationId' --output text)
+    EIP_PUBLIC=$(aws ec2 describe-addresses --region "$REGION" --allocation-ids "$EIP_ALLOC" \
+        --query 'Addresses[0].PublicIp' --output text)
+    save_state "eip_alloc_id" "$EIP_ALLOC"
+    save_state "eip_public_ip" "$EIP_PUBLIC"
+    info "Allocated Elastic IP: ${EIP_PUBLIC} (${EIP_ALLOC})"
+}
+
+associate_eip() {
+    local instance_id="$1"
+    info "Associating Elastic IP ${EIP_PUBLIC} with server instance..."
+    aws ec2 associate-address --region "$REGION" \
+        --allocation-id "$EIP_ALLOC" --instance-id "$instance_id" >/dev/null
+}
+
+ensure_volume() {
+    local role="$1" size="$2" az="$3"
+    local vol_id
+    vol_id=$(load_state "vol_${role}")
+    if [ -n "$vol_id" ]; then
+        if aws ec2 describe-volumes --region "$REGION" --volume-ids "$vol_id" >/dev/null 2>&1; then
+            info "Reusing data volume for ${role}: ${vol_id}" >&2
+            echo "$vol_id"
+            return
+        fi
+        warn "Volume ${vol_id} for ${role} no longer exists, creating new one..." >&2
+    fi
+
+    info "Creating ${size} GiB data volume for ${role} in ${az}..." >&2
+    vol_id=$(aws ec2 create-volume --region "$REGION" \
+        --availability-zone "$az" \
+        --size "$size" \
+        --volume-type gp3 \
+        --tag-specifications "$(tag_spec volume "${role}-data")" \
+        --query 'VolumeId' --output text)
+    save_state "vol_${role}" "$vol_id"
+    info "Created volume ${vol_id} for ${role}" >&2
+    echo "$vol_id"
+}
+
+attach_and_mount_volume() {
+    local vol_id="$1" instance_id="$2" ip="$3" key="$4" mount_point="$5"
+
+    info "Waiting for volume ${vol_id} to be available..."
+    aws ec2 wait volume-available --region "$REGION" --volume-ids "$vol_id" 2>/dev/null || true
+
+    info "Attaching ${vol_id} to ${instance_id}..."
+    aws ec2 attach-volume --region "$REGION" \
+        --volume-id "$vol_id" --instance-id "$instance_id" --device /dev/xvdf >/dev/null
+
+    info "Waiting for volume to attach..."
+    aws ec2 wait volume-in-use --region "$REGION" --volume-ids "$vol_id" 2>/dev/null || true
+    sleep 3
+
+    info "Mounting at ${mount_point}..."
+    remote_exec "$ip" "$key" "
+        sudo bash -c '
+            # Wait for the block device to appear
+            for i in \$(seq 1 10); do
+                [ -b /dev/xvdf ] && break
+                # Nitro instances may expose as /dev/nvme1n1
+                [ -b /dev/nvme1n1 ] && ln -sf /dev/nvme1n1 /dev/xvdf && break
+                sleep 2
+            done
+
+            DEV=/dev/xvdf
+            [ -b /dev/nvme1n1 ] && [ ! -b /dev/xvdf ] && DEV=/dev/nvme1n1
+
+            if ! blkid \$DEV >/dev/null 2>&1; then
+                mkfs.ext4 -q \$DEV
+            fi
+            mkdir -p ${mount_point}
+            mount \$DEV ${mount_point}
+        '
+    "
+}
+
+detach_volume() {
+    local role="$1"
+    local vol_id
+    vol_id=$(load_state "vol_${role}")
+    [ -n "$vol_id" ] || return 0
+
+    local vol_state
+    vol_state=$(aws ec2 describe-volumes --region "$REGION" --volume-ids "$vol_id" \
+        --query 'Volumes[0].State' --output text 2>/dev/null || echo "missing")
+
+    if [ "$vol_state" = "in-use" ]; then
+        info "Detaching data volume for ${role}: ${vol_id}..."
+        aws ec2 detach-volume --region "$REGION" --volume-id "$vol_id" --force >/dev/null 2>&1 || true
+        aws ec2 wait volume-available --region "$REGION" --volume-ids "$vol_id" 2>/dev/null || true
+    fi
+}
+
+delete_volume() {
+    local role="$1"
+    local vol_id
+    vol_id=$(load_state "vol_${role}")
+    [ -n "$vol_id" ] || return 0
+
+    info "Deleting data volume for ${role}: ${vol_id}..."
+    aws ec2 delete-volume --region "$REGION" --volume-id "$vol_id" 2>/dev/null || true
 }
 
 # ---- deploy ----
@@ -318,6 +445,17 @@ do_deploy() {
     save_state "key_name" "$KEY_NAME"
     save_state "key_file" "$KEY_FILE"
 
+    # Elastic IP for server (persists across teardown/deploy cycles)
+    ensure_eip
+
+    # Save AZ for volume creation
+    save_state "az" "$AZ"
+
+    # Data volumes (persists across teardown/deploy cycles)
+    VOL_SERVER=$(ensure_volume "server" 5 "$AZ")
+    VOL_CLIENT=$(ensure_volume "client" 20 "$AZ")
+    VOL_NODE=$(ensure_volume "node" 10 "$AZ")
+
     # Launch instances
     # Args: role sg instance_type [cpu_options]
     launch_instance() {
@@ -350,16 +488,19 @@ do_deploy() {
     info "Waiting for instances to be running..."
     aws ec2 wait instance-running --region "$REGION" --instance-ids "$INST_SERVER" "$INST_NODE" "$INST_CLIENT"
 
-    # Get public IPs
+    # Associate Elastic IP with server
+    associate_eip "$INST_SERVER"
+    IP_SERVER="$EIP_PUBLIC"
+    save_state "ip_server" "$IP_SERVER"
+
+    # Get public IPs for node and client (ephemeral)
     get_ip() {
         aws ec2 describe-instances --region "$REGION" --instance-ids "$1" \
             --query 'Reservations[0].Instances[0].PublicIpAddress' --output text
     }
 
-    IP_SERVER=$(get_ip "$INST_SERVER")
     IP_NODE=$(get_ip "$INST_NODE")
     IP_CLIENT=$(get_ip "$INST_CLIENT")
-    save_state "ip_server" "$IP_SERVER"
     save_state "ip_node" "$IP_NODE"
     save_state "ip_client" "$IP_CLIENT"
 
@@ -372,6 +513,11 @@ do_deploy() {
     wait_for_ssh "$IP_SERVER" "$KEY_FILE"
     wait_for_ssh "$IP_NODE" "$KEY_FILE"
     wait_for_ssh "$IP_CLIENT" "$KEY_FILE"
+
+    # Attach and mount persistent data volumes
+    attach_and_mount_volume "$VOL_SERVER" "$INST_SERVER" "$IP_SERVER" "$KEY_FILE" "/opt/testnet/data"
+    attach_and_mount_volume "$VOL_CLIENT" "$INST_CLIENT" "$IP_CLIENT" "$KEY_FILE" "/root/.testnet"
+    attach_and_mount_volume "$VOL_NODE"   "$INST_NODE"   "$IP_NODE"   "$KEY_FILE" "/opt/testnet"
 
     # ---- Deploy server ----
     info "Deploying server..."
@@ -507,14 +653,16 @@ do_deploy() {
     echo "  Region:  ${REGION}"
     echo "  VPC:     ${VPC_ID}"
     echo ""
-    echo "  Server:  ${IP_SERVER}  (${INST_SERVER})"
+    echo "  Server:  ${IP_SERVER} (EIP)  (${INST_SERVER})"
     echo "  Node:    ${IP_NODE}  (${INST_NODE})"
     echo "  Client:  ${IP_CLIENT}  (${INST_CLIENT})"
     echo ""
     echo "  SSH key:    ${KEY_FILE}"
+    echo "  Elastic IP: ${EIP_PUBLIC} (${EIP_ALLOC})"
     echo "  Node name:  ${NODE_NAME}"
     echo "  Node secret: ${NODE_SECRET}"
     echo "  Join token: ${JOIN_TOKEN}"
+    echo "  Data vols:  server=${VOL_SERVER} client=${VOL_CLIENT} node=${VOL_NODE}"
     echo ""
     echo "  SSH commands:"
     echo "    ssh -i ${KEY_FILE} ubuntu@${IP_SERVER}   # server"
@@ -526,8 +674,10 @@ do_deploy() {
     echo "    ssh -i ${KEY_FILE} ubuntu@${IP_NODE}   'sudo journalctl -u testnet-node -f'"
     echo "    ssh -i ${KEY_FILE} ubuntu@${IP_CLIENT} 'sudo journalctl -u testnet-client -f'"
     echo ""
-    echo "  Teardown:"
+    echo "  Teardown (preserves EIP + data volumes):"
     echo "    bash deploy/aws-deploy.sh teardown"
+    echo "  Full teardown (destroys everything):"
+    echo "    bash deploy/aws-deploy.sh teardown --full"
     echo ""
     echo "  Instance types: server=${INSTANCE_TYPE_SERVER}, node=${INSTANCE_TYPE_NODE}, client=${INSTANCE_TYPE_CLIENT}"
     echo "  Override with: INSTANCE_TYPE_CLIENT=<type> bash deploy/aws-deploy.sh deploy"
@@ -546,10 +696,6 @@ do_status() {
     inst_node=$(load_state "instance_node")
     inst_client=$(load_state "instance_client")
 
-    if [ -z "$inst_server" ]; then
-        err "No instances found in state file."
-    fi
-
     local key_file ip_server
     key_file=$(load_state "key_file")
     ip_server=$(load_state "ip_server")
@@ -557,6 +703,27 @@ do_status() {
     echo ""
     echo "Agent Testnet Status (${REGION})"
     echo "================================"
+
+    # Show persistent resources even when no instances are running
+    local eip_alloc eip_ip
+    eip_alloc=$(load_state "eip_alloc_id")
+    eip_ip=$(load_state "eip_public_ip")
+    if [ -n "$eip_alloc" ]; then
+        echo ""
+        echo "Elastic IP:  ${eip_ip} (${eip_alloc})"
+    fi
+    for role in server client node; do
+        local vid
+        vid=$(load_state "vol_${role}")
+        [ -n "$vid" ] && echo "Volume (${role}): ${vid}"
+    done
+
+    if [ -z "$inst_server" ]; then
+        echo ""
+        echo "No active instances. Run 'deploy' to launch."
+        echo ""
+        return
+    fi
     echo ""
 
     # -- EC2 instances --
@@ -575,7 +742,7 @@ do_status() {
         svc_name="testnet-${role}"
         if [ "$ec2_state" = "running" ] && [ -f "$key_file" ]; then
             svc_state=$(remote_exec "$ip" "$key_file" \
-                "systemctl is-active $svc_name 2>/dev/null || echo 'inactive'" 2>/dev/null) || svc_state="ssh-err"
+                "systemctl is-active $svc_name 2>/dev/null || true" 2>/dev/null) || svc_state="ssh-err"
         else
             svc_state="-"
         fi
@@ -813,12 +980,23 @@ do_test() {
 # ---- teardown ----
 
 do_teardown() {
+    local full_teardown=false
+    if [ "${1:-}" = "--full" ]; then
+        full_teardown=true
+        info "Full teardown requested -- EIP and data volumes will be destroyed."
+    fi
+
     if [ ! -f "$STATE_FILE" ]; then
         err "No state file found. Nothing to tear down."
     fi
 
     info "Tearing down Agent Testnet in ${REGION}..."
     local teardown_errors=0
+
+    # Detach persistent data volumes before terminating instances
+    for role in server client node; do
+        detach_volume "$role"
+    done
 
     # Terminate instances (including any extra tagged instances in this VPC)
     local vpc_id
@@ -894,7 +1072,6 @@ do_teardown() {
     local rtb_id
     rtb_id=$(load_state "rtb_id")
     if [ -n "$rtb_id" ]; then
-        # Disassociate any non-main associations before deletion
         local assoc_ids
         assoc_ids=$(aws ec2 describe-route-tables --region "$REGION" --route-table-ids "$rtb_id" \
             --query 'RouteTables[0].Associations[?Main!=`true`].RouteTableAssociationId' --output text 2>/dev/null || true)
@@ -930,7 +1107,6 @@ do_teardown() {
         info "Deleting VPC: ${vpc_id}..."
         if ! aws ec2 delete-vpc --region "$REGION" --vpc-id "$vpc_id" 2>/dev/null; then
             warn "Failed to delete VPC ${vpc_id} -- checking for remaining dependencies..."
-            # List what's blocking deletion
             local remaining
             remaining=$(aws ec2 describe-vpc-attribute --region "$REGION" --vpc-id "$vpc_id" --attribute enableDnsSupport 2>/dev/null && echo "VPC still exists" || echo "")
             if [ -n "$remaining" ]; then
@@ -941,7 +1117,21 @@ do_teardown() {
         fi
     fi
 
-    # Only clean up local state if teardown fully succeeded
+    # Full teardown: release EIP and delete data volumes
+    if $full_teardown; then
+        local eip_alloc
+        eip_alloc=$(load_state "eip_alloc_id")
+        if [ -n "$eip_alloc" ]; then
+            info "Releasing Elastic IP: ${eip_alloc}..."
+            aws ec2 release-address --region "$REGION" --allocation-id "$eip_alloc" 2>/dev/null || true
+        fi
+
+        for role in server client node; do
+            delete_volume "$role"
+        done
+    fi
+
+    # Clean up local state
     local key_file
     key_file=$(load_state "key_file")
     if [ "$teardown_errors" -eq 0 ]; then
@@ -949,14 +1139,52 @@ do_teardown() {
             rm -f "$key_file"
             info "Removed SSH key: ${key_file}"
         fi
-        rm -f "$STATE_FILE"
-        info "Teardown complete."
+
+        if $full_teardown; then
+            rm -f "$STATE_FILE"
+            info "Full teardown complete. All resources destroyed."
+        else
+            # Preserve persistent resource keys, remove everything else
+            local preserved_keys="eip_alloc_id eip_public_ip vol_server vol_client vol_node az"
+            local tmp="${STATE_FILE}.tmp"
+            python3 -c "
+import json
+with open('$STATE_FILE') as f:
+    state = json.load(f)
+keep = {k: state[k] for k in '$preserved_keys'.split() if k in state}
+with open('$tmp', 'w') as f:
+    json.dump(keep, f, indent=2)
+"
+            mv "$tmp" "$STATE_FILE"
+            info "Teardown complete. Persistent resources preserved (EIP + data volumes)."
+            info "  Re-deploy with: bash deploy/aws-deploy.sh deploy"
+            info "  Full cleanup:   bash deploy/aws-deploy.sh teardown --full"
+        fi
     else
         warn "Teardown completed with ${teardown_errors} error(s)."
         warn "State file preserved: ${STATE_FILE}"
         warn "Re-run 'teardown' after manually resolving the above issues."
         exit 1
     fi
+}
+
+# ---- logs ----
+
+do_logs() {
+    local role="${1:-}"
+    [ -n "$role" ] || err "Usage: $0 logs <server|node|client>"
+    [ -f "$STATE_FILE" ] || err "No state file. Run 'deploy' first."
+
+    local ip key_file svc_name
+    ip=$(load_state "ip_${role}")
+    key_file=$(load_state "key_file")
+
+    [ -n "$ip" ] || err "No IP found for role: ${role}"
+    [ -f "$key_file" ] || err "SSH key not found: ${key_file}"
+
+    svc_name="testnet-${role}"
+    info "Tailing ${svc_name} logs on ${ip} (Ctrl+C to stop)..."
+    remote_exec "$ip" "$key_file" "sudo journalctl -u ${svc_name} -f --no-pager -n 100"
 }
 
 # ---- openclaw ----
@@ -1060,14 +1288,15 @@ do_openclaw() {
 ACTION="${1:-}"
 case "$ACTION" in
     deploy)   do_deploy ;;
-    teardown) do_teardown ;;
+    teardown) do_teardown "${2:-}" ;;
     status)   do_status ;;
     ssh)      do_ssh "${2:-}" ;;
     restart)  do_restart "${2:-}" ;;
     redeploy) do_redeploy "${2:-}" ;;
+    logs)     do_logs "${2:-}" ;;
     reload)   do_reload ;;
     test)     do_test ;;
     openclaw) shift; do_openclaw "$@" ;;
-    "")       err "Usage: $0 <deploy|teardown|status|ssh|restart|redeploy|reload|test|openclaw>" ;;
-    *)        err "Unknown action: $ACTION. Use: deploy, teardown, status, ssh, restart, redeploy, reload, test, openclaw" ;;
+    "")       err "Usage: $0 <deploy|teardown [--full]|status|ssh|redeploy|restart|logs|reload|test|openclaw>" ;;
+    *)        err "Unknown action: $ACTION. Use: deploy, teardown [--full], status, ssh, redeploy, restart, logs, reload, test, openclaw" ;;
 esac

@@ -50,8 +50,8 @@ func setupTestServer(t *testing.T) (*ControlPlane, *httptest.Server) {
 			TunnelIP: "10.99.0.1/16",
 		},
 		VIP: config.VIPConfig{
-			Subnet: "10.100.0.0/16",
-			DNSVIP: "10.100.0.1",
+			Subnet: "83.150.0.0/16",
+			DNSVIP: "83.150.0.1",
 		},
 	}
 

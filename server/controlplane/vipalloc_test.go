@@ -5,12 +5,12 @@ import (
 )
 
 func TestVIPAllocator_Sequential(t *testing.T) {
-	va, err := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	va, err := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	expected := []string{"10.100.0.2", "10.100.0.3", "10.100.0.4"}
+	expected := []string{"83.150.0.2", "83.150.0.3", "83.150.0.4"}
 	for i, want := range expected {
 		ip, err := va.AllocateVIP("node-" + string(rune('a'+i)))
 		if err != nil {
@@ -23,7 +23,7 @@ func TestVIPAllocator_Sequential(t *testing.T) {
 }
 
 func TestVIPAllocator_Idempotent(t *testing.T) {
-	va, err := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	va, err := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,14 +42,14 @@ func TestVIPAllocator_Idempotent(t *testing.T) {
 }
 
 func TestVIPAllocator_SkipsDNSVIP(t *testing.T) {
-	va, err := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	va, err := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	allocs := va.AllAllocations()
 	for _, ip := range allocs {
-		if ip.String() == "10.100.0.1" {
+		if ip.String() == "83.150.0.1" {
 			t.Fatal("DNS VIP should never be allocated to a key")
 		}
 	}
@@ -60,25 +60,25 @@ func TestVIPAllocator_SkipsDNSVIP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ip.String() == "10.100.0.1" {
+		if ip.String() == "83.150.0.1" {
 			t.Fatal("allocated the DNS VIP to a node")
 		}
 	}
 }
 
 func TestVIPAllocator_DNSVIP(t *testing.T) {
-	va, err := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	va, err := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	dns := va.DNSVIP()
-	if dns.String() != "10.100.0.1" {
-		t.Fatalf("expected DNS VIP 10.100.0.1, got %s", dns)
+	if dns.String() != "83.150.0.1" {
+		t.Fatalf("expected DNS VIP 83.150.0.1, got %s", dns)
 	}
 }
 
 func TestVIPAllocator_Release(t *testing.T) {
-	va, err := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	va, err := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,14 +107,14 @@ func TestVIPAllocator_Release(t *testing.T) {
 }
 
 func TestVIPAllocator_InvalidSubnet(t *testing.T) {
-	_, err := NewVIPAllocator("invalid", "10.100.0.1")
+	_, err := NewVIPAllocator("invalid", "83.150.0.1")
 	if err == nil {
 		t.Fatal("expected error for invalid subnet")
 	}
 }
 
 func TestVIPAllocator_InvalidDNSVIP(t *testing.T) {
-	_, err := NewVIPAllocator("10.100.0.0/16", "invalid")
+	_, err := NewVIPAllocator("83.150.0.0/16", "invalid")
 	if err == nil {
 		t.Fatal("expected error for invalid DNS VIP")
 	}

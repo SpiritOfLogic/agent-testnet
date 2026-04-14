@@ -43,7 +43,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	tunnelAddr := s.cfg.DNS.ListenTunnel
 	if tunnelAddr != "" {
-		// The tunnel address (e.g. 10.100.0.1:53) may not be bindable yet if
+		// The tunnel address (e.g. 83.150.0.1:53) may not be bindable yet if
 		// the WireGuard interface hasn't finished setup. Retry with backoff.
 		go s.listenWithRetry(ctx, tunnelAddr, "udp", "tunnel", handler, &s.udpTunnel)
 		go s.listenWithRetry(ctx, tunnelAddr, "tcp", "tunnel", handler, &s.tcpTunnel)

@@ -38,7 +38,7 @@ is dropped.
 Requires root or CAP_NET_ADMIN + CAP_SYS_ADMIN.`,
 		Example: `  # Run a crawler confined to the testnet
   testnet-toolkit sandbox run \
-    --dns-ip 10.100.0.1 \
+    --dns-ip 83.150.0.1 \
     --ca-cert /etc/testnet/certs/ca.pem \
     -- /usr/local/bin/my-crawler --seeds /var/lib/seeds.txt
 
@@ -55,7 +55,7 @@ Requires root or CAP_NET_ADMIN + CAP_SYS_ADMIN.`,
 				if v := os.Getenv("DNS_IP"); v != "" {
 					dnsIP = v
 				} else {
-					dnsIP = "10.100.0.1"
+					dnsIP = "83.150.0.1"
 				}
 			}
 			if caCert == "" {
@@ -91,10 +91,10 @@ Requires root or CAP_NET_ADMIN + CAP_SYS_ADMIN.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&dnsIP, "dns-ip", "", "testnet DNS address (default 10.100.0.1) [$DNS_IP]")
+	cmd.Flags().StringVar(&dnsIP, "dns-ip", "", "testnet DNS address (default 83.150.0.1) [$DNS_IP]")
 	cmd.Flags().StringVar(&caCert, "ca-cert", "", "path to testnet CA cert (default /etc/testnet/certs/ca.pem) [$CA_CERT_PATH]")
 	cmd.Flags().StringVar(&wgInterface, "wg-interface", "", "WireGuard interface to route through (default wg0) [$WG_INTERFACE]")
-	cmd.Flags().StringVar(&allowedCIDR, "allowed-cidrs", "10.100.0.0/16,10.99.0.0/16", "comma-separated CIDRs reachable from the sandbox [$ALLOWED_CIDRS]")
+	cmd.Flags().StringVar(&allowedCIDR, "allowed-cidrs", "83.150.0.0/16,10.99.0.0/16", "comma-separated CIDRs reachable from the sandbox [$ALLOWED_CIDRS]")
 
 	return cmd
 }

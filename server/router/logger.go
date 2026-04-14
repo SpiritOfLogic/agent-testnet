@@ -154,9 +154,9 @@ func (l *Logger) parseConntrackLine(line string) *ConnLog {
 				entry.AgentIP = parts[1]
 			}
 		case "dst":
-			if entry.DstVIP == "" && strings.HasPrefix(parts[1], "10.100.") {
+			if entry.DstVIP == "" && strings.HasPrefix(parts[1], "83.150.") {
 				entry.DstVIP = parts[1]
-			} else if entry.DstReal == "" && !strings.HasPrefix(parts[1], "10.") {
+			} else if entry.DstReal == "" && !strings.HasPrefix(parts[1], "10.") && !strings.HasPrefix(parts[1], "83.150.") {
 				entry.DstReal = parts[1]
 			}
 		case "dport":

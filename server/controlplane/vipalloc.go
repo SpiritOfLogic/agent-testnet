@@ -6,13 +6,13 @@ import (
 	"sync"
 )
 
-// VIPAllocator manages virtual IP allocation from the 10.100.0.0/16 subnet.
+// VIPAllocator manages virtual IP allocation from the VIP subnet (default 83.150.0.0/16).
 type VIPAllocator struct {
 	mu        sync.Mutex
 	subnet    *net.IPNet
 	dnsVIP    net.IP
 	allocated map[string]net.IP // key (node name or domain) -> VIP
-	nextOctet [2]byte           // tracks next available in 10.100.X.Y
+	nextOctet [2]byte           // tracks next available in {subnet}.X.Y
 }
 
 func NewVIPAllocator(subnet, dnsVIP string) (*VIPAllocator, error) {
@@ -30,7 +30,7 @@ func NewVIPAllocator(subnet, dnsVIP string) (*VIPAllocator, error) {
 		subnet:    ipNet,
 		dnsVIP:    dns.To4(),
 		allocated: make(map[string]net.IP),
-		nextOctet: [2]byte{0, 2}, // start at 10.100.0.2 (0.1 is DNS)
+		nextOctet: [2]byte{0, 2}, // start at {subnet}.0.2 (0.1 is DNS)
 	}, nil
 }
 

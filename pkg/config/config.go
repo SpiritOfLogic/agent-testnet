@@ -121,7 +121,7 @@ func setServerDefaults(cfg *ServerConfig) {
 		cfg.ControlPlane.NodesFile = "./configs/nodes.yaml"
 	}
 	if cfg.DNS.ListenTunnel == "" {
-		cfg.DNS.ListenTunnel = "10.100.0.1:53"
+		cfg.DNS.ListenTunnel = "83.150.0.1:53"
 	}
 	if cfg.DNS.RefreshInterval == 0 {
 		cfg.DNS.RefreshInterval = 10 * time.Second
@@ -133,10 +133,10 @@ func setServerDefaults(cfg *ServerConfig) {
 		cfg.WireGuard.TunnelIP = "10.99.0.1/16"
 	}
 	if cfg.VIP.Subnet == "" {
-		cfg.VIP.Subnet = "10.100.0.0/16"
+		cfg.VIP.Subnet = "83.150.0.0/16"
 	}
 	if cfg.VIP.DNSVIP == "" {
-		cfg.VIP.DNSVIP = "10.100.0.1"
+		cfg.VIP.DNSVIP = "83.150.0.1"
 	}
 }
 

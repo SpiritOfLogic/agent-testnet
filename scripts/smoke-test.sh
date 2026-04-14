@@ -110,8 +110,8 @@ router:
   log_file: "${DATA_DIR}/data/traffic.log"
 
 vip:
-  subnet: "10.100.0.0/16"
-  dns_vip: "10.100.0.1"
+  subnet: "83.150.0.0/16"
+  dns_vip: "83.150.0.1"
 YAML
 
 echo "--- Starting server ---"
@@ -212,13 +212,13 @@ echo ""
 echo "--- DNS Tests ---"
 
 # Test: DNS resolves registered domain
-check_output "DNS: google.com -> VIP" "10.100" \
+check_output "DNS: google.com -> VIP" "83.150" \
     dig @127.0.0.1 -p 15353 google.com A +short +time=2 +tries=1
 
-check_output "DNS: github.com -> VIP" "10.100" \
+check_output "DNS: github.com -> VIP" "83.150" \
     dig @127.0.0.1 -p 15353 github.com A +short +time=2 +tries=1
 
-check_output "DNS: google-node.testnet -> VIP" "10.100" \
+check_output "DNS: google-node.testnet -> VIP" "83.150" \
     dig @127.0.0.1 -p 15353 google-node.testnet A +short +time=2 +tries=1
 
 # Test: DNS returns NXDOMAIN for unregistered domain

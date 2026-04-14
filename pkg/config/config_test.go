@@ -46,7 +46,7 @@ vip:
 	}
 
 	// DNS defaults should be applied for unset fields
-	if cfg.DNS.ListenTunnel != "10.100.0.1:53" {
+	if cfg.DNS.ListenTunnel != "83.150.0.1:53" {
 		t.Fatalf("expected default DNS listen_tunnel, got %s", cfg.DNS.ListenTunnel)
 	}
 	if cfg.DNS.RefreshInterval != 10*time.Second {
@@ -85,10 +85,10 @@ func TestLoadServerConfig_Defaults(t *testing.T) {
 	if cfg.ControlPlane.NodesFile != "./configs/nodes.yaml" {
 		t.Fatalf("expected default nodes_file, got %s", cfg.ControlPlane.NodesFile)
 	}
-	if cfg.VIP.Subnet != "10.100.0.0/16" {
+	if cfg.VIP.Subnet != "83.150.0.0/16" {
 		t.Fatalf("expected default VIP subnet, got %s", cfg.VIP.Subnet)
 	}
-	if cfg.VIP.DNSVIP != "10.100.0.1" {
+	if cfg.VIP.DNSVIP != "83.150.0.1" {
 		t.Fatalf("expected default DNS VIP, got %s", cfg.VIP.DNSVIP)
 	}
 }

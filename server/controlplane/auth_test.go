@@ -11,7 +11,7 @@ import (
 func testNodeManager(t *testing.T, nodes []api.Node) *NodeManager {
 	t.Helper()
 	dir := t.TempDir()
-	vipAlloc, err := NewVIPAllocator("10.100.0.0/16", "10.100.0.1")
+	vipAlloc, err := NewVIPAllocator("83.150.0.0/16", "83.150.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}

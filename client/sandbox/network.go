@@ -56,7 +56,7 @@ func SetupNetwork(agentID string, vmIndex int, serverTunnelIP, dnsIP, wgInterfac
 	rules := [][]string{
 		// Allow VM -> VIP subnet (testnet services)
 		{"-A", "FORWARD", "-i", tapName, "-s", guestIP + "/32",
-			"-d", "10.100.0.0/16", "-j", "ACCEPT"},
+			"-d", "83.150.0.0/16", "-j", "ACCEPT"},
 		// Allow VM -> server tunnel IP (for DNS)
 		{"-A", "FORWARD", "-i", tapName, "-s", guestIP + "/32",
 			"-d", serverTunnelIP + "/32", "-j", "ACCEPT"},
@@ -128,7 +128,7 @@ func cleanupNetwork(tapName, guestIP, subnet, serverTunnelIP, wgInterface string
 	runIPTables("-D", "INPUT", "-i", tapName, "-m", "conntrack",
 		"--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT")
 	runIPTables("-D", "FORWARD", "-i", tapName, "-s", guestIP+"/32",
-		"-d", "10.100.0.0/16", "-j", "ACCEPT")
+		"-d", "83.150.0.0/16", "-j", "ACCEPT")
 	runIPTables("-D", "FORWARD", "-i", tapName, "-s", guestIP+"/32",
 		"-d", serverTunnelIP+"/32", "-j", "ACCEPT")
 	runIPTables("-D", "FORWARD", "-o", tapName, "-m", "conntrack",
