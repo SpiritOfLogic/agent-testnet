@@ -150,6 +150,99 @@ get_model_ref() {
     fi
 }
 
+# Write ~/.openclaw/openclaw.json in the VM. Keeps install + reconfig in sync.
+# Args: $1 = model_ref, $2 = gateway auth token
+#
+# Browser notes:
+#   - ssrfPolicy.dangerouslyAllowPrivateNetwork=true works around OpenClaw
+#     2026.4.x behaviour where the default SSRF policy silently blocks the
+#     gateway's own loopback CDP pre-flight (ws://127.0.0.1:18800/...) and
+#     any hostname-based navigation, causing "Chrome CDP websocket not
+#     reachable" and "strict browser SSRF policy" errors inside the VM.
+#   - Browser flags are chosen for a headless Firecracker guest (no GPU, no
+#     /dev/shm worth using). Avoid --use-gl=swiftshader here: it crashes on
+#     Alpine Chromium in a microVM.
+write_openclaw_config() {
+    local model_ref="$1" gw_token="$2"
+    vm_ssh "cat > ~/.openclaw/openclaw.json" <<OCEOF
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.openclaw/workspace",
+      "model": {
+        "primary": "${model_ref}"
+      }
+    }
+  },
+  "gateway": {
+    "mode": "local",
+    "port": 18789,
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": "${gw_token}"
+    }
+  },
+  "browser": {
+    "enabled": true,
+    "headless": true,
+    "executablePath": "/usr/bin/chromium-browser",
+    "noSandbox": true,
+    "ssrfPolicy": {
+      "dangerouslyAllowPrivateNetwork": true
+    },
+    "extraArgs": [
+      "--disable-gpu",
+      "--disable-software-rasterizer",
+      "--use-gl=disabled",
+      "--disable-dev-shm-usage",
+      "--ignore-certificate-errors",
+      "--ozone-platform=headless",
+      "--disable-extensions",
+      "--disable-background-networking",
+      "--headless=new"
+    ]
+  },
+  "skills": {
+    "allowBundled": []
+  },
+  "logging": {
+    "level": "info",
+    "redactSensitive": "tools"
+  }
+}
+OCEOF
+    vm_ssh "chmod 600 ~/.openclaw/openclaw.json"
+}
+
+# Work around an OpenClaw 2026.4.x bug where the per-agent models.json is
+# generated with "https://openrouter.ai/v1" as the OpenRouter baseUrl instead
+# of the correct "https://openrouter.ai/api/v1". The wrong URL returns the
+# OpenRouter marketing homepage (HTTP 200 HTML) instead of the API, so the
+# OpenAI-compatible parser sees zero choices and the agent turn ends with
+# stopReason=stop and empty content ("Agent couldn't generate a response").
+# This patches every models.json under ~/.openclaw/agents/*/agent/ and must
+# be run AFTER the gateway has started at least once (so the files exist).
+fix_openrouter_base_url() {
+    vm_ssh 'for f in /root/.openclaw/agents/*/agent/models.json; do
+              [ -f "$f" ] || continue
+              grep -q "openrouter.ai/v1\"" "$f" 2>/dev/null || continue
+              sed -i "s|https://openrouter.ai/v1\"|https://openrouter.ai/api/v1\"|g" "$f"
+              echo "fixed: $f"
+            done' || true
+}
+
+start_openclaw_gateway() {
+    vm_ssh "source /etc/profile.d/openclaw.sh && \
+            export OPENCLAW_NO_RESPAWN=1 && \
+            export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser && \
+            export CHROME_PATH=/usr/bin/chromium-browser && \
+            export NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache && \
+            mkdir -p /var/tmp/openclaw-compile-cache && \
+            setsid nohup openclaw gateway </dev/null > ~/.openclaw/gateway.log 2>&1 &"
+    sleep 5
+}
+
 # ---- parse arguments ----
 
 while [[ $# -gt 0 ]]; do
@@ -396,7 +489,10 @@ do_install() {
     info "Setting up domain proxies..."
     local ip_offset=$PROXY_IP_OFFSET
 
-    local install_domains="dl-cdn.alpinelinux.org registry.npmjs.org"
+    # OpenClaw's npm tree pulls a couple of dependencies directly from GitHub
+    # (e.g. libsignal-node via `ssh://git@github.com/...`). We proxy github.com
+    # on 443 and force git-over-HTTPS below so the install doesn't try port 22.
+    local install_domains="dl-cdn.alpinelinux.org registry.npmjs.org github.com codeload.github.com"
     for domain in $install_domains $llm_domain; do
         local proxy_ip="${gw_base}.${ip_offset}"
         start_proxy "$domain" "$proxy_ip" "$tap_device"
@@ -423,7 +519,7 @@ do_install() {
     # the flags to every launch, so they take effect regardless of how
     # OpenClaw (or the agent) invokes the browser.
     vm_ssh "cat > /etc/chromium/chromium.conf" <<'CRCONF'
-CHROMIUM_FLAGS="--use-gl=swiftshader --disable-gpu --disable-dev-shm-usage --ignore-certificate-errors --ozone-platform-hint=auto"
+CHROMIUM_FLAGS="--disable-gpu --disable-software-rasterizer --use-gl=disabled --disable-dev-shm-usage --ignore-certificate-errors --ozone-platform=headless"
 CRCONF
 
     local node_ver
@@ -439,6 +535,14 @@ CRCONF
     # paths in packages like @aws-sdk. Upgrading npm first pulls in a fixed tar.
     info "Upgrading npm..."
     vm_ssh "mkdir -p /root/.npm-tmp && TMPDIR=/root/.npm-tmp npm install -g npm@latest 2>&1" | tail -2
+
+    # Install git (needed for npm git-url deps) and rewrite ssh://git@github.com
+    # URLs to https:// so git uses the github.com:443 proxy we set up above.
+    vm_ssh "apk add --no-cache git openssh-client" >/dev/null 2>&1
+    vm_ssh "git config --global --unset-all url.https://github.com/.insteadOf 2>/dev/null; \
+            git config --global --add url.https://github.com/.insteadOf ssh://git@github.com/ && \
+            git config --global --add url.https://github.com/.insteadOf git@github.com: && \
+            git config --global --add url.https://github.com/.insteadOf git://github.com/"
 
     # npm uses /tmp for extraction, which is tmpfs (RAM-backed) on Alpine.
     # OpenClaw + @aws-sdk deps need significant temp space, so point npm's
@@ -483,50 +587,8 @@ CRCONF
     local model_ref
     model_ref=$(get_model_ref "$PROVIDER" "$MODEL")
 
-    # Write the config using the real OpenClaw JSON5 schema.
     # OpenClaw strictly validates config — unknown keys prevent gateway from starting.
-    vm_ssh "cat > ~/.openclaw/openclaw.json" <<OCEOF
-{
-  "agents": {
-    "defaults": {
-      "workspace": "~/.openclaw/workspace",
-      "model": {
-        "primary": "${model_ref}"
-      }
-    }
-  },
-  "gateway": {
-    "mode": "local",
-    "port": 18789,
-    "bind": "loopback",
-    "auth": {
-      "mode": "token",
-      "token": "${gw_token}"
-    }
-  },
-  "browser": {
-    "enabled": true,
-    "headless": true,
-    "executablePath": "/usr/bin/chromium-browser",
-    "noSandbox": true,
-    "extraArgs": [
-      "--use-gl=swiftshader",
-      "--ignore-certificate-errors",
-      "--disable-gpu",
-      "--disable-dev-shm-usage"
-    ]
-  },
-  "skills": {
-    "allowBundled": []
-  },
-  "logging": {
-    "level": "info",
-    "redactSensitive": "tools"
-  }
-}
-OCEOF
-
-    vm_ssh "chmod 600 ~/.openclaw/openclaw.json"
+    write_openclaw_config "$model_ref" "$gw_token"
 
     # Persist the API key via OpenClaw's .env mechanism (auto-loaded by the gateway)
     vm_ssh "cat > ~/.openclaw/.env" <<ENV
@@ -546,9 +608,27 @@ ENV
 
     # ---- Start OpenClaw gateway ----
 
-    info "Starting OpenClaw gateway..."
-    vm_ssh "source /etc/profile.d/openclaw.sh && export OPENCLAW_NO_RESPAWN=1 && export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser && export CHROME_PATH=/usr/bin/chromium-browser && export NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache && mkdir -p /var/tmp/openclaw-compile-cache && setsid nohup openclaw gateway </dev/null > ~/.openclaw/gateway.log 2>&1 &"
-    sleep 5
+    info "Starting OpenClaw gateway (first boot, to materialize agent state)..."
+    start_openclaw_gateway
+
+    if ! vm_ssh "pgrep -f '[o]penclaw.*gateway'" >/dev/null 2>&1; then
+        warn "Gateway may not have started cleanly."
+        warn "Log output:"
+        vm_ssh "cat ~/.openclaw/gateway.log" 2>/dev/null || true
+    fi
+
+    # Wait for the default agent's models.json to be created, then patch the
+    # OpenRouter baseUrl and restart the gateway so the fix takes effect.
+    info "Applying OpenRouter baseUrl workaround..."
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        vm_ssh "test -f /root/.openclaw/agents/main/agent/models.json" >/dev/null 2>&1 && break
+        sleep 1
+    done
+    fix_openrouter_base_url
+    vm_ssh "killall -9 openclaw-gateway 2>/dev/null; pkill -9 -f 'openclaw.*gateway' 2>/dev/null; sleep 1" || true
+
+    info "Restarting OpenClaw gateway with patched models.json..."
+    start_openclaw_gateway
 
     if vm_ssh "pgrep -f '[o]penclaw.*gateway'" >/dev/null 2>&1; then
         info "OpenClaw gateway is running!"
@@ -609,8 +689,8 @@ do_chat() {
 
     if ! vm_ssh "pgrep -f '[o]penclaw.*gateway'" >/dev/null 2>&1; then
         warn "OpenClaw gateway is not running — starting it..."
-        vm_ssh "source /etc/profile.d/openclaw.sh && export OPENCLAW_NO_RESPAWN=1 && export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser && export CHROME_PATH=/usr/bin/chromium-browser && setsid nohup openclaw gateway </dev/null > ~/.openclaw/gateway.log 2>&1 &"
-        sleep 5
+        fix_openrouter_base_url
+        start_openclaw_gateway
     fi
 
     ensure_llm_proxy
@@ -754,47 +834,7 @@ do_reconfig() {
     gw_token=$(load_state "gw_token")
     [ -n "$gw_token" ] || gw_token=$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
 
-    vm_ssh "cat > ~/.openclaw/openclaw.json" <<OCEOF
-{
-  "agents": {
-    "defaults": {
-      "workspace": "~/.openclaw/workspace",
-      "model": {
-        "primary": "${model_ref}"
-      }
-    }
-  },
-  "gateway": {
-    "mode": "local",
-    "port": 18789,
-    "bind": "loopback",
-    "auth": {
-      "mode": "token",
-      "token": "${gw_token}"
-    }
-  },
-  "browser": {
-    "enabled": true,
-    "headless": true,
-    "executablePath": "/usr/bin/chromium-browser",
-    "noSandbox": true,
-    "extraArgs": [
-      "--use-gl=swiftshader",
-      "--ignore-certificate-errors",
-      "--disable-gpu",
-      "--disable-dev-shm-usage"
-    ]
-  },
-  "skills": {
-    "allowBundled": []
-  },
-  "logging": {
-    "level": "info",
-    "redactSensitive": "tools"
-  }
-}
-OCEOF
-    vm_ssh "chmod 600 ~/.openclaw/openclaw.json"
+    write_openclaw_config "$model_ref" "$gw_token"
 
     # Update API key
     vm_ssh "cat > ~/.openclaw/.env" <<ENV
@@ -848,10 +888,12 @@ ENV
 
     save_state "provider" "$PROVIDER"
 
-    # Restart gateway
+    # Re-apply the OpenRouter baseUrl workaround in case a newer OpenClaw
+    # version regenerated models.json since last run, then restart gateway.
+    fix_openrouter_base_url
+
     info "Starting OpenClaw gateway..."
-    vm_ssh "source /etc/profile.d/openclaw.sh && export OPENCLAW_NO_RESPAWN=1 && export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser && export CHROME_PATH=/usr/bin/chromium-browser && export NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache && mkdir -p /var/tmp/openclaw-compile-cache && setsid nohup openclaw gateway </dev/null > ~/.openclaw/gateway.log 2>&1 &"
-    sleep 5
+    start_openclaw_gateway
 
     if vm_ssh "pgrep -f '[o]penclaw.*gateway'" >/dev/null 2>&1; then
         info "OpenClaw gateway is running!"
